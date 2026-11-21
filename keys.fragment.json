@@ -1,0 +1,32 @@
+{
+  "$comment": "Recommended Herdr App keybinding fragments for omarchy-glass. Merge into ~/.config/herdr-app/keys.json (dotfiles owns the full keys.json.tmpl).",
+  "layout:omarchy-glass": {
+    "alt-down": "space-folders-next.next",
+    "alt-up": "space-folders-next.prev",
+    "ctrl-shift-pagedown": "space-folders-next.next",
+    "ctrl-shift-pageup": "space-folders-next.prev",
+    "ctrl-space space": "mod.open:goto",
+    "ctrl-shift-k": "mod.open:goto",
+    "ctrl-space m": "goto.move-tab",
+    "ctrl-space M": "goto.move-space",
+    "ctrl-space shift-m": "goto.move-space"
+  },
+  "layout:omarchy-glass-insights": {
+    "alt-down": "space-folders-next.next",
+    "alt-up": "space-folders-next.prev",
+    "ctrl-shift-pagedown": "space-folders-next.next",
+    "ctrl-shift-pageup": "space-folders-next.prev",
+    "ctrl-space space": "mod.open:goto",
+    "ctrl-shift-k": "mod.open:goto",
+    "ctrl-space m": "goto.move-tab",
+    "ctrl-space M": "goto.move-space",
+    "ctrl-space shift-m": "goto.move-space"
+  },
+  "mod:tui-prefix": {
+    "ctrl-space": "tui-prefix.send-prefix"
+  },
+  "mod:markdown-browser": {
+    "cmd-shift-o": "markdown-browser.open",
+    "ctrl-shift-o": "markdown-browser.open"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "place": "none",
+  "title": "Go to anything",
+  "overlay": {
+    "kind": "popup",
+    "frame": "none",
+    "at": "top",
+    "offset": 72,
+    "width": 1120,
+    "height": 680
+  }
+}

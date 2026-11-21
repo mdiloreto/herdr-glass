@@ -1,0 +1,15 @@
+{
+  "version": "3.0.0",
+  "place": "none",
+  "title": "Better Sidebar",
+  "settings": {
+    "git": {
+      "retry_after": "15s"
+    },
+    "pull_request_status": true
+  },
+  "cloned_from": {
+    "name": "better-sidebar",
+    "version": "0.1.13"
+  }
+}

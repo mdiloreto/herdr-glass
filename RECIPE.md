@@ -6,7 +6,7 @@ This repository packages the `omarchy-glass` and `omarchy-glass-insights` Herdr 
 
 - **Herdr App:** `>= 0.1.16` (relies on shipped mods `workspace-chrome`, `workspace-status`, `worktree`, `agents`, and `picker` — none of which are overwritten by this pack).
 - **Platforms:** Linux and macOS.
-- **Visibility:** Private repository (see [`PROVENANCE.md`](./PROVENANCE.md) before considering public distribution).
+- **Provenance:** See [`PROVENANCE.md`](./PROVENANCE.md) for attribution of cloned Herdr App shipped mods and upstream forks.
 
 ## Contents
 

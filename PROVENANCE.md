@@ -1,6 +1,6 @@
-# Mod Provenance & Visibility Audit
+# Mod Provenance & Attribution
 
-> **Status: KEEP PRIVATE.** Several mods in this pack derive from Herdr App shipped mods (`cloned_from`) or third-party forks (`munza/herdr-mods`, `mdiloreto/usage-insights`) without an explicit redistributable license audit yet. Do not flip repository visibility to public until every non-original entry below is cleared.
+Several mods in this layout pack derive from Herdr App shipped mods (`cloned_from`) or upstream forks (`munza/herdr-mods`, `mdiloreto/usage-insights`). Attribution and upstream origins are listed below.
 
 | Mod | Origin | Notes |
 | --- | --- | --- |

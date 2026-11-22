@@ -786,8 +786,10 @@ export default class Spaces extends View {
     const folded = this.folded.has(m) && !this.fstate.machines.includes(m ?? "");
     const active = this.activeMachine === m;
     const name = m ?? "This computer";
+    const label = m?.replace(/^(\d{1,3}\.\d{1,3}\.)(\d{1,3}\.\d{1,3})$/, "$1\n$2") ?? "LOCAL";
     const state = (machine?.state ?? "asleep").replace(/_/g, " ");
-    const head = h_flex().id(`machine-${m ?? "local"}`).h(26).flex_none().pl(collapsed ? 0 : nested ? 26 : 8).pr(collapsed ? 0 : 8).gap(7).items_center().text_size(11).text_color(t.dim)
+    const icon = `mods/workspace-chrome/${m ? "server" : "monitor"}.svg`;
+    const head = h_flex().id(`machine-${m ?? "local"}`).when(!collapsed, el => el.h(26)).flex_none().pl(collapsed ? 0 : nested ? 26 : 8).pr(collapsed ? 0 : 8).gap(7).items_center().text_size(11).text_color(t.dim)
       .cursor_pointer().hover(s => s.bg(t.hover))
       .on_click((_e, cx) => {
         const held = release(this.fstate.machines, m ?? "");
@@ -798,19 +800,14 @@ export default class Spaces extends View {
         }
         cx.notify();
       })
-      .when(collapsed, el => {
-        const chars = [...(m ?? "LOCAL")];
-        const ip = m?.match(/^(?:\d{1,3}\.){3}(\d{1,3})$/);
-        const label = ip ? `…${ip[1]}`
-          : chars.length > 6 ? `${chars.slice(0, 3).join("")}…${chars.slice(-2).join("")}` : chars.join("");
-        return el.justify_center().tooltip(`${name}${active ? " · Active workspace" : ""}${connected ? "" : ` · ${state}`}`)
-          .child(h_flex().w_full().max_w(52).h(22).min_w(0).px(1).items_center().justify_center().rounded(5)
-            .border_1().border_color(active ? t.accent : t.border).bg(active ? t.selected : t.raised)
-            .text_size(10).font_semibold().text_color(active || connected ? t.foreground : t.muted)
-            .child(div().min_w(0).truncate().child(label)));
-      })
+      .when(collapsed, el => el.justify_center().tooltip(`${name}${active ? " · Active workspace" : ""}${connected ? "" : ` · ${state}`}`)
+        .child(v_flex().w_full().max_w(52).min_w(0).px(2).py(3).gap(1).items_center().rounded(5)
+          .border_1().border_color(active ? t.accent : t.border).bg(active ? t.selected : t.raised)
+          .text_size(10).font_semibold().text_color(active || connected ? t.foreground : t.muted)
+          .child(svg(icon).size(12).flex_none().text_color(active ? t.accent : t.muted))
+          .child(div().w_full().text_center().line_height(1.15).whitespace_normal().child(label))))
       .when(!collapsed, el => el
-        .child(svg(`mods/workspace-chrome/${m ? "server" : "monitor"}.svg`).size(13).flex_none())
+        .child(svg(icon).size(13).flex_none())
         .child(div().flex_1().truncate().child(name))
         .when(!connected, el => el.child(div().flex_none().child(state)))
         .when(connected, el => el.child(div().id(`machine-folder-${m ?? "local"}`).flex_none().px(3).rounded(4).hover(s => s.bg(t.hover).text_color(t.foreground))

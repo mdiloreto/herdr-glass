@@ -12,6 +12,9 @@ const FREE_MODELS_TRIED = 2;
 const MODEL_FAILED_MS = 60 * 60 * 1000;
 const FIELD_MAX = 200;
 const AGY_MODEL = "gemini-3.8-flash-low";
+// agy switches from OS keyring to file-based token storage when it sees SSH_*
+// in the environment, which breaks auth if Herdr App inherited SSH vars.
+const AGY_ENV = ["-u", "SSH_CLIENT", "-u", "SSH_CONNECTION", "-u", "SSH_TTY"];
 
 // The free models get only the tab-namer agent. A private, hidden config dir
 // (.xdg: opencode writes into a config dir it loads, and a visible file there
@@ -275,8 +278,8 @@ export function createNamer(env) {
 
   const agy = (prompt) =>
     run(
-      "agy",
-      ["--agent", "tab-namer", "--model", AGY_MODEL, "--disable-slash-commands", "--print-timeout", "40s",
+      "env",
+      [...AGY_ENV, "agy", "--agent", "tab-namer", "--model", AGY_MODEL, "--disable-slash-commands", "--print-timeout", "40s",
         "--output-format", "json", "-p", prompt],
       45000,
       parseAgyOrFail,

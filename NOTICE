@@ -1,0 +1,112 @@
+herdr-omarchy-glass
+
+The original work in this repository is licensed under the MIT License (LICENSE).
+
+The mods listed below derive from third-party projects. They keep their
+original licenses and were modified by mdiloreto. Base commits and a summary of
+the changes are in PROVENANCE.md.
+
+Third-party mods and layouts listed in vendor.json are shipped unchanged and
+keep their own licenses. This repository's MIT License does not apply to them. Each
+upstream license, and its NOTICE file where it has one, is copied verbatim to
+LICENSES/.
+
+--------------------------------------------------------------------------
+Shipped unchanged, Apache License 2.0
+
+munza/herdr-mods: mods better-alerts, better-changes, better-files. Licenses
+and NOTICE files are in LICENSES/munza-herdr-mods-<commit>.txt and
+LICENSES/munza-herdr-mods-<commit>.NOTICE.txt, one set per pinned commit.
+
+JinJieBeWater/herdr-t3: the t3-* mods and the herdr-t3 layout. License in
+LICENSES/JinJieBeWater-herdr-t3.txt. The upstream has no NOTICE file.
+
+--------------------------------------------------------------------------
+Shipped unchanged, MIT License with bundled third-party code
+
+quaresc/cockpit: the cockpit mod bundles Apache-2.0 components, plus MIT code
+and ISC icons. Their notices are in
+LICENSES/quaresc-cockpit.THIRD_PARTY_NOTICES.md, copied verbatim. The upstream
+files it names ship here with a quaresc-cockpit. prefix: LICENSE is
+LICENSES/quaresc-cockpit.txt, and LICENSES/Apache-2.0.txt is
+LICENSES/quaresc-cockpit.Apache-2.0.txt.
+
+--------------------------------------------------------------------------
+munza/herdr-mods, Apache License 2.0 (LICENSES/Apache-2.0.txt)
+
+Mods: better-tabs, branch-pr, better-sidebar-rail, rail-next. The last two
+derive from its better-sidebar.
+
+Upstream NOTICE:
+
+Herdr Mods — Better Changes, Better Files, Better Sidebar, Better Tabs, Branch PR,
+and Branch Issue
+Copyright 2026 Tawsif Aqib
+
+Better Changes adapts behavior and code from Herdr Desktop's shipped Changes mod.
+Better Files adapts behavior and code from Herdr Desktop's shipped Files mod.
+Herdr Desktop is available at https://github.com/herdrdev/herdr-app and is
+licensed under the Apache License, Version 2.0.
+
+Better Sidebar adapts code from Herdr Desktop's shipped spaces and agents mods.
+Its bundled navigation and pull-request SVG icons are also adapted from
+Herdr Desktop.
+
+Better Tabs adapts Herdr Desktop's shipped tabs mod through the former Factory
+Tabs clone. Its bundled close, spinner, file, changes, and window-control SVG
+icons are adapted from Herdr Desktop as well. It adds configurable toolbar
+actions, trusted local hooks, an opt-in shared button registry, and overflow.
+
+Branch PR extracts the pull-request integration originally developed in
+herdr-workflow by Tawsif Aqib, including its native UI, GitHub CLI Go bridge,
+agent actions, and tests. Its bundled UI SVG icons are adapted from Herdr
+Desktop's icon set.
+
+Better Icons bundles icons from the Material Icon Theme for VS Code, version
+5.40.0, copyright (c) 2025 Material Extensions, licensed under the MIT License
+(https://github.com/material-extensions/vscode-material-icon-theme). The
+licence text ships beside them as LICENSE-material-icon-theme.txt.
+
+This distribution adds tree/flat file lists, staging controls, reusable diff
+tabs, inline/split views, configurable typography, right-aligned space branches,
+standalone GitHub CLI pull-request status, documentation, and tests.
+
+--------------------------------------------------------------------------
+herdrdev/herdr-app, Apache License 2.0 (LICENSES/Apache-2.0.txt)
+
+Mods: space-folders, space-folders-next. Both derive from its shipped `spaces`
+mod (defaults/mods/spaces). The upstream LICENSE, README and about.toml state
+no copyright holder.
+
+--------------------------------------------------------------------------
+herunan/herdr-over9k, MIT License
+
+Mod: over9k-prompts. Upstream license:
+
+MIT License
+
+Copyright (c) 2026 the Over9k authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------
+ohneda/herdr-markdown-browser, MIT License
+
+Mod: markdown-browser. Its license ships inside the mod as
+mods/markdown-browser/LICENSE.

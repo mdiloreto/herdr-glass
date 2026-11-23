@@ -79,24 +79,37 @@ function turnBucket(turn) {
   return Math.floor(Math.log2(n)) + 1;
 }
 
+function isAgyProgram(program) {
+  const key = program?.key?.toLowerCase();
+  const name = program?.name?.toLowerCase();
+  return key === "antigravity" || key === "agy" || name === "antigravity";
+}
+
+function isPiProgram(program) {
+  const key = program?.key?.toLowerCase();
+  const name = program?.name?.toLowerCase();
+  return key === "pi" || key === "oh-my-pi" || name === "pi" || name === "oh-my-pi";
+}
+
 // What the agent called its session: explicit session labels, else a terminal
 // title that says more than the terminal's own address, program name, path,
 // user@host, or raw CLI invocation.
 function sessionName(p, labels) {
+  if (!p.program?.agent) return null;
   const tlabels = labels.get(p.terminal);
   if (tlabels) {
-    const keys = ["agent.title", "session.title", "claude.title"];
-    const pkey = p.program?.key?.toLowerCase();
-    const pname = p.program?.name?.toLowerCase();
-    if (pkey === "pi" || pkey === "oh-my-pi" || pname === "pi" || pname === "oh-my-pi") {
-      keys.push("pi.session");
-    }
+    const keys = [
+      "agent.title",
+      "session.title",
+      ...(isAgyProgram(p.program) ? ["agy.title"] : []),
+      "claude.title",
+      ...(isPiProgram(p.program) ? ["pi.session"] : []),
+    ];
     for (const k of keys) {
       const val = tlabels[k]?.trim();
       if (val && !isCliInvocation(val, p.program)) return val;
     }
   }
-  if (!p.program?.agent) return null;
   const raw = (p.title ?? "").trim();
   const bare = bareId(p.terminal);
   if (!raw || raw === p.terminal || (bare && raw === bare) || isCliInvocation(raw, p.program)) return null;
@@ -112,6 +125,13 @@ function sessionName(p, labels) {
     isCliInvocation(title, p.program)
   ) return null;
   return title;
+}
+
+function sessionCwd(p, labels) {
+  if (!p.program?.agent) return p.cwd;
+  const tlabels = labels.get(p.terminal);
+  if (isAgyProgram(p.program)) return tlabels?.["agy.cwd"]?.trim() || p.cwd;
+  return tlabels?.["claude.cwd"]?.trim() || p.cwd;
 }
 
 function same(a, b) {
@@ -180,8 +200,9 @@ export default class AgentNames extends View {
       const name = sessionName(p, labels);
       if (!name || next[p.pane]) continue;
       const ctx = labels.get(p.terminal)?.["claude.ctx"];
+      const cwd = sessionCwd(p, labels);
       const userHome = this.homeFor(p.terminal, cx);
-      next[p.pane] = { by: BY, title: name, detail: [ctx, shortFolder(p.cwd, userHome)].filter(Boolean).join(" · ") };
+      next[p.pane] = { by: BY, title: name, detail: [ctx, shortFolder(cwd, userHome)].filter(Boolean).join(" · ") };
     }
     if (!same(heads, next)) setShared("pane-heads", next);
   }
@@ -198,7 +219,7 @@ export default class AgentNames extends View {
       typed: typed ?? null,
       panes: mine.map((p) => {
         const session = sessionName(p, labels);
-        const cwd = labels.get(p.terminal)?.["claude.cwd"] ?? p.cwd;
+        const cwd = sessionCwd(p, labels);
         const userHome = this.homeFor(p.terminal, cx);
         const rawTitle = (p.title ?? "").trim();
         const cleanTitle = rawTitle.replace(/^[^\p{L}\p{N}]+/u, "").trim();

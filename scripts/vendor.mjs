@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -89,7 +89,8 @@ try {
   // Phase 1: validate and fetch everything; the pack is not touched.
   const seen = new Set();
   const plan = [];
-  for (const { repo, commit, paths } of entries) {
+  const outputs = new Set();
+  for (const { repo, commit, paths, notices } of entries) {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error(`bad repo: ${repo}`);
     if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error(`bad commit: ${commit}`);
     for (const dest of Object.keys(paths)) {
@@ -121,7 +122,17 @@ try {
     const files = [{ from: license, to: join(root, "LICENSES", `${slug}.txt`) }];
     const notice = findFile(checkout, NOTICE_NAMES);
     if (notice) files.push({ from: notice, to: join(root, "LICENSES", `${slug}.NOTICE.txt`) });
-    for (const f of files) assertNotSymlink(f.to);
+    // Notices that upstream keeps outside the vendored paths.
+    for (const rel of notices ?? []) {
+      const from = safeSource(checkout, rel);
+      if (!lstatSync(from).isFile()) throw new Error(`notice is not a regular file: ${rel}`);
+      files.push({ from, to: join(root, "LICENSES", `${slug}.${basename(rel)}`) });
+    }
+    for (const f of files) {
+      assertNotSymlink(f.to);
+      if (outputs.has(f.to)) throw new Error(`duplicate license output: ${relative(root, f.to)}`);
+      outputs.add(f.to);
+    }
 
     plan.push({ copies, files });
   }

@@ -21,6 +21,11 @@ LICENSES/munza-herdr-mods-<commit>.NOTICE.txt, one set per pinned commit.
 JinJieBeWater/herdr-t3: the t3-* mods and the herdr-t3 layout. License in
 LICENSES/JinJieBeWater-herdr-t3.txt. The upstream has no NOTICE file.
 
+quaresc/cockpit (MIT): the cockpit mod bundles Apache-2.0 components, plus MIT
+code and ISC icons. Their notices are in
+LICENSES/quaresc-cockpit.THIRD_PARTY_NOTICES.md, with the Apache-2.0 text in
+LICENSES/quaresc-cockpit.Apache-2.0.txt.
+
 --------------------------------------------------------------------------
 munza/herdr-mods, Apache License 2.0 (LICENSES/Apache-2.0.txt)
 

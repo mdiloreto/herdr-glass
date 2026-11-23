@@ -48,7 +48,8 @@
     "paths": {
       "mods/cockpit": "app/mods/cockpit",
       "layouts/cockpit.json": "app/layouts/cockpit.json"
-    }
+    },
+    "notices": ["THIRD_PARTY_NOTICES.md", "LICENSES/Apache-2.0.txt", "LICENSES/OFL-1.1.txt"]
   },
   {
     "repo": "linziyanleo/herdr-mods",

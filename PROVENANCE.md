@@ -38,7 +38,7 @@ The base commit is the closest match found, not a recorded fork point.
 | `tahadx/workspace` | MIT | `agents-list`, `footer`, `hoverfocus`, `icons`, `shortcuts`, `sidebar-menu`, `terminals-list`, `worktrees` |
 | `munza/herdr-mods` | Apache-2.0 | `better-alerts`*, `better-changes`*, `better-files`* |
 | `dougcunha/herdr-mods` | MIT | `ci-dash`* |
-| `quaresc/cockpit` | MIT | `cockpit` |
+| `quaresc/cockpit` | MIT; bundles Apache-2.0 and MIT code and ISC (Lucide) icons, see `LICENSES/quaresc-cockpit.THIRD_PARTY_NOTICES.md`. Its OFL-1.1 fonts are only in upstream `docs/` and test fixtures, not in `mods/cockpit`; the OFL text is kept in `LICENSES/` for completeness. | `cockpit` |
 | `linziyanleo/herdr-mods` | MIT; bundles Apache-2.0, EPL-2.0 and BSD-2-Clause components (see `mods/preview-plus/THIRD_PARTY.md`) | `preview-plus` |
 | `mrolafsson/herdr-recap` | MIT | `recap` |
 | `JinJieBeWater/herdr-t3` | Apache-2.0 | `t3-actions`, `t3-agents`, `t3-chrome`, `t3-home`, `t3-inbox`*, `t3-menu`, `t3-new-menu`, `t3-pane`, `t3-picker`, `t3-spaces`, `t3-tabs` |

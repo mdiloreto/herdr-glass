@@ -49,6 +49,9 @@ function assertNoSymlinks(path) {
 function safeSource(checkout, rel) {
   const abs = resolve(checkout, rel);
   if (!inside(checkout, abs)) throw new Error(`source escapes checkout: ${rel}`);
+  if (abs === checkout || relative(checkout, abs).split(sep).includes(".git")) {
+    throw new Error(`source must be a path below the checkout, outside .git: ${rel}`);
+  }
   assertNoSymlinks(abs);
   if (!inside(checkout, realpathSync(abs))) throw new Error(`source escapes checkout: ${rel}`);
   return abs;

@@ -46,14 +46,20 @@ function assertNoSymlinks(path) {
   }
 }
 
+// Case-insensitive, since .GIT is .git on macOS volumes.
+const inGitDir = (checkout, path) => relative(checkout, path).toLowerCase().split(sep).includes(".git");
+
 function safeSource(checkout, rel) {
   const abs = resolve(checkout, rel);
   if (!inside(checkout, abs)) throw new Error(`source escapes checkout: ${rel}`);
-  if (abs === checkout || relative(checkout, abs).split(sep).includes(".git")) {
+  if (abs === checkout || inGitDir(checkout, abs)) {
     throw new Error(`source must be a path below the checkout, outside .git: ${rel}`);
   }
   assertNoSymlinks(abs);
-  if (!inside(checkout, realpathSync(abs))) throw new Error(`source escapes checkout: ${rel}`);
+  const real = realpathSync(abs);
+  if (!inside(checkout, real) || real === checkout || inGitDir(checkout, real)) {
+    throw new Error(`source escapes checkout or reaches .git: ${rel}`);
+  }
   return abs;
 }
 

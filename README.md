@@ -1,6 +1,6 @@
 # herdr-omarchy-glass
 
-Standalone Herdr App layout repository for `omarchy-glass` and `omarchy-glass-insights`, plus the original and forked mods the layouts use.
+Standalone Herdr App layout repository for `omarchy-glass` and `omarchy-glass-insights` and other layouts, plus the original, forked and vendored third-party mods the layouts use.
 
 See [`RECIPE.md`](./RECIPE.md) for installation and sync instructions and [`PROVENANCE.md`](./PROVENANCE.md) for mod attribution and provenance.
 
@@ -20,4 +20,4 @@ On macOS:
 
 ## License
 
-MIT, see [`LICENSE`](./LICENSE). Forked mods keep their upstream licenses: see [`NOTICE`](./NOTICE) and [`LICENSES/`](./LICENSES/).
+MIT, see [`LICENSE`](./LICENSE). Forked and vendored mods keep their upstream licenses: see [`NOTICE`](./NOTICE) and [`LICENSES/`](./LICENSES/).

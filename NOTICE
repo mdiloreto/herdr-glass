@@ -6,6 +6,21 @@ The mods listed below derive from third-party projects. They keep their
 original licenses and were modified by mdiloreto. Base commits and a summary of
 the changes are in PROVENANCE.md.
 
+Third-party mods and layouts listed in vendor.json are shipped unchanged and
+keep their own licenses. This repository's MIT License does not apply to them. Each
+upstream license, and its NOTICE file where it has one, is copied verbatim to
+LICENSES/.
+
+--------------------------------------------------------------------------
+Shipped unchanged, Apache License 2.0
+
+munza/herdr-mods: mods better-alerts, better-changes, better-files. Licenses
+and NOTICE files are in LICENSES/munza-herdr-mods-<commit>.txt and
+LICENSES/munza-herdr-mods-<commit>.NOTICE.txt, one set per pinned commit.
+
+JinJieBeWater/herdr-t3: the t3-* mods and the herdr-t3 layout. License in
+LICENSES/JinJieBeWater-herdr-t3.txt. The upstream has no NOTICE file.
+
 --------------------------------------------------------------------------
 munza/herdr-mods, Apache License 2.0 (LICENSES/Apache-2.0.txt)
 

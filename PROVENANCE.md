@@ -29,21 +29,31 @@ The base commit is the closest match found, not a recorded fork point.
 | `space-folders` | `herdrdev/herdr-app:defaults/mods/spaces` | `8672b99da5b8e33c0f69a35e7a3e500777f1b8aa` | Apache-2.0 | Added space folders with drag-and-drop, rule-based collection and per-machine storage, and new avatar tints. |
 | `space-folders-next` | `herdrdev/herdr-app:defaults/mods/spaces` | `8672b99da5b8e33c0f69a35e7a3e500777f1b8aa` | Apache-2.0 | `space-folders` plus follow-the-front-space folding, `goto` move requests and tab-drag drops. |
 
-## Third-party mods used unchanged, not shipped here
+## Third-party mods shipped unchanged
 
-`dotfiles` installs these from upstream at the pinned commits. Mods marked `*` are referenced by `layouts/omarchy-glass.json` and `layouts/omarchy-glass-insights.json`.
+`scripts/vendor.mjs` copies these from upstream, unmodified, at the commits and paths recorded in [`vendor.json`](./vendor.json). Do not edit them here; change `vendor.json` and rerun the script. Mods marked `*` are referenced by `layouts/omarchy-glass.json` and `layouts/omarchy-glass-insights.json`.
 
-| Repo | Commit | Mods (path) |
+| Repo | License | Mods |
 | --- | --- | --- |
-| `tahadx/workspace` | `069b5bf7d4be3158c121a0da719bba45db1ee830` | `agents-list`, `footer`, `hoverfocus`, `icons`, `shortcuts`, `sidebar-menu`, `terminals-list`, `worktrees` (`mods/<name>`) |
-| `munza/herdr-mods` | `1abf4870adb4c3f7a71739db1e0c29493f5e3f95` | `better-alerts`* (`better-alerts/mods/better-alerts`) |
-| `munza/herdr-mods` | `9bd1f7e9a55a264563bfd82d2552502fda1cca6d` | `better-changes`* (`better-changes/mods/better-changes`), `better-files`* (`better-files/mods/better-files`) |
-| `dougcunha/herdr-mods` | `9e0b6e7126a7db608471acb9497159c7bd2fae53` | `ci-dash`* (`ci-dash-app/mods/ci-dash`) |
-| `quaresc/cockpit` | `02c0ad112383a252db054ef471d6baa21ba8091c` | `cockpit` (`app/mods/cockpit`) |
-| `linziyanleo/herdr-mods` | `9d8e0172da18902b18650951fe3f187e19964334` | `preview-plus` (`preview-plus/mods/preview-plus`) |
-| `mrolafsson/herdr-recap` | `b2e25a779ad1b0260e3dcce3e39ee1974ad01382` | `recap` (`app/mods/recap`) |
-| `JinJieBeWater/herdr-t3` | `17bbad1f7206ce4c5fb165059976887fde6a0fbc` | `t3-actions`, `t3-agents`, `t3-chrome`, `t3-home`, `t3-inbox`*, `t3-menu`, `t3-new-menu`, `t3-pane`, `t3-picker`, `t3-spaces`, `t3-tabs` (`mods/<name>`) |
-| `nozikov/herdr-usage-limits` | `7ea49bbe49bef99786e965f88b5ca6b124bdd941` | `usage-limits`* (`mods/usage-limits`) |
+| `tahadx/workspace` | MIT | `agents-list`, `footer`, `hoverfocus`, `icons`, `shortcuts`, `sidebar-menu`, `terminals-list`, `worktrees` |
+| `munza/herdr-mods` | Apache-2.0 | `better-alerts`*, `better-changes`*, `better-files`* |
+| `dougcunha/herdr-mods` | MIT | `ci-dash`* |
+| `quaresc/cockpit` | MIT | `cockpit` |
+| `linziyanleo/herdr-mods` | MIT | `preview-plus` |
+| `mrolafsson/herdr-recap` | MIT | `recap` |
+| `JinJieBeWater/herdr-t3` | Apache-2.0 | `t3-actions`, `t3-agents`, `t3-chrome`, `t3-home`, `t3-inbox`*, `t3-menu`, `t3-new-menu`, `t3-pane`, `t3-picker`, `t3-spaces`, `t3-tabs` |
+| `nozikov/herdr-usage-limits` | MIT | `usage-limits`* |
 
 `insights`* comes from `mdiloreto/usage-insights` (`mods/insights`) and is installed separately.
 `fleet-quota` stays in `dotfiles`.
+
+## Layouts
+
+| Layout | Origin |
+| --- | --- |
+| `omarchy-glass`, `omarchy-glass-insights`, `omarchy`, `omarchy-next` | Ours (MIT). No upstream has them. |
+| `cockpit` | Third-party, shipped unchanged from `quaresc/cockpit` (`vendor.json`). |
+| `herdr-t3` | Third-party, shipped unchanged from `JinJieBeWater/herdr-t3` (`vendor.json`). |
+| `workspace` | Third-party, shipped unchanged from `tahadx/workspace` (`vendor.json`). |
+
+`omarchy.json` came from a `dotfiles` template; this is its Linux and macOS rendering, which includes the `fleet-quota` block.

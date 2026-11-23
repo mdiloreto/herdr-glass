@@ -1,0 +1,97 @@
+[
+  {
+    "repo": "tahadx/workspace",
+    "commit": "069b5bf7d4be3158c121a0da719bba45db1ee830",
+    "license": "MIT",
+    "paths": {
+      "mods/agents-list": "mods/agents-list",
+      "mods/footer": "mods/footer",
+      "mods/hoverfocus": "mods/hoverfocus",
+      "mods/icons": "mods/icons",
+      "mods/shortcuts": "mods/shortcuts",
+      "mods/sidebar-menu": "mods/sidebar-menu",
+      "mods/terminals-list": "mods/terminals-list",
+      "mods/worktrees": "mods/worktrees",
+      "layouts/workspace.json": "layouts/workspace.json",
+      "layouts/workspace.svg": "layouts/workspace.svg"
+    }
+  },
+  {
+    "repo": "munza/herdr-mods",
+    "commit": "1abf4870adb4c3f7a71739db1e0c29493f5e3f95",
+    "license": "Apache-2.0",
+    "paths": {
+      "mods/better-alerts": "better-alerts/mods/better-alerts"
+    }
+  },
+  {
+    "repo": "munza/herdr-mods",
+    "commit": "9bd1f7e9a55a264563bfd82d2552502fda1cca6d",
+    "license": "Apache-2.0",
+    "paths": {
+      "mods/better-changes": "better-changes/mods/better-changes",
+      "mods/better-files": "better-files/mods/better-files"
+    }
+  },
+  {
+    "repo": "dougcunha/herdr-mods",
+    "commit": "9e0b6e7126a7db608471acb9497159c7bd2fae53",
+    "license": "MIT",
+    "paths": {
+      "mods/ci-dash": "ci-dash-app/mods/ci-dash"
+    }
+  },
+  {
+    "repo": "quaresc/cockpit",
+    "commit": "02c0ad112383a252db054ef471d6baa21ba8091c",
+    "license": "MIT",
+    "paths": {
+      "mods/cockpit": "app/mods/cockpit",
+      "layouts/cockpit.json": "app/layouts/cockpit.json"
+    }
+  },
+  {
+    "repo": "linziyanleo/herdr-mods",
+    "commit": "9d8e0172da18902b18650951fe3f187e19964334",
+    "license": "MIT",
+    "paths": {
+      "mods/preview-plus": "preview-plus/mods/preview-plus"
+    }
+  },
+  {
+    "repo": "mrolafsson/herdr-recap",
+    "commit": "b2e25a779ad1b0260e3dcce3e39ee1974ad01382",
+    "license": "MIT",
+    "paths": {
+      "mods/recap": "app/mods/recap"
+    }
+  },
+  {
+    "repo": "JinJieBeWater/herdr-t3",
+    "commit": "17bbad1f7206ce4c5fb165059976887fde6a0fbc",
+    "license": "Apache-2.0",
+    "paths": {
+      "mods/t3-actions": "mods/t3-actions",
+      "mods/t3-agents": "mods/t3-agents",
+      "mods/t3-chrome": "mods/t3-chrome",
+      "mods/t3-home": "mods/t3-home",
+      "mods/t3-inbox": "mods/t3-inbox",
+      "mods/t3-menu": "mods/t3-menu",
+      "mods/t3-new-menu": "mods/t3-new-menu",
+      "mods/t3-pane": "mods/t3-pane",
+      "mods/t3-picker": "mods/t3-picker",
+      "mods/t3-spaces": "mods/t3-spaces",
+      "mods/t3-tabs": "mods/t3-tabs",
+      "layouts/herdr-t3.json": "layouts/herdr-t3.json",
+      "layouts/herdr-t3.svg": "layouts/herdr-t3.svg"
+    }
+  },
+  {
+    "repo": "nozikov/herdr-usage-limits",
+    "commit": "7ea49bbe49bef99786e965f88b5ca6b124bdd941",
+    "license": "MIT",
+    "paths": {
+      "mods/usage-limits": "mods/usage-limits"
+    }
+  }
+]

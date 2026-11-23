@@ -1,22 +1,24 @@
 # Herdr Layout Recipe — `omarchy-glass`
 
-This repository packages the `omarchy-glass` and `omarchy-glass-insights` Herdr App layouts, themes, and the original and forked mods they use, following the `herdr-layout` layout-pack convention.
+This repository packages the `omarchy-glass` and `omarchy-glass-insights` Herdr App layouts, themes, other layouts, and all the mods they use (original, forked and vendored third-party), following the `herdr-layout` layout-pack convention.
 
 ## Compatibility
 
 - **Herdr App:** `>= 0.1.16` (relies on shipped mods `workspace-chrome`, `workspace-status`, `worktree`, `agents`, and `picker` — none of which are overwritten by this pack).
 - **Platforms:** Linux and macOS.
-- **Provenance:** See [`PROVENANCE.md`](./PROVENANCE.md) for forked mods, base commits, and the third-party mods the layouts need at pinned commits.
+- **Provenance:** See [`PROVENANCE.md`](./PROVENANCE.md) for forked mods, base commits, and the third-party mods shipped unchanged (commits in `vendor.json`).
 
 ## Contents
 
 - `layouts/`
   - `omarchy-glass.json` — main translucent glass layout with sidebar rail, T3 inbox stack, right panel (`better-files`, `better-changes`, `markdown-browser`, `branch-pr`, `ci-dash`, `over9k-prompts`), `usage-limits` bar, and background daemons (`tui-prefix`, `agent-names`, `agent-resume`, `goto`).
   - `omarchy-glass-insights.json` — variant with compact sidebar footer height tuned for Insights workflows.
+  - `omarchy.json`, `omarchy-next.json` — our other layouts.
+  - `cockpit.json`, `herdr-t3.json` (+ `herdr-t3.svg`), `workspace.json` (+ `workspace.svg`) — third-party layouts shipped unchanged. The `.svg` files are layout previews and are copied with the `.json`.
 - `themes/`
   - `omarchy.json`
   - `catppuccin.json`
-- `mods/` — 15 mods: 7 original and 8 forks of third-party mods (see `PROVENANCE.md`). Third-party mods used unchanged are not shipped here.
+- `mods/` — every mod the layouts use: original mods, forks, and third-party mods shipped unchanged (see `PROVENANCE.md`). The third-party content is copied by `scripts/vendor.mjs` from the commits in `vendor.json`.
 - `keys.fragment.json` — recommended `layout:omarchy-glass*` and mod-scoped keybinding fragments.
 
 ## Installation
@@ -37,12 +39,11 @@ HERDR_LAYOUT_ROOT=~/vscode/herdr-omarchy-glass dotfiles-plugins sync --only herd
 
 ### Manual installation
 
-1. Copy `layouts/*.json` into `~/.config/herdr-app/layouts/`.
+1. Copy `layouts/*.json` and `layouts/*.svg` into `~/.config/herdr-app/layouts/`.
 2. Copy `themes/*.json` into `~/.config/herdr-app/themes/`.
-3. Symlink or copy each folder in `mods/` into `~/.config/herdr-app/mods/`.
-4. Install the third-party mods listed in `PROVENANCE.md` at their pinned commits.
-5. Merge the sections from `keys.fragment.json` into `~/.config/herdr-app/keys.json`.
-6. Select `omarchy-glass` (or `omarchy-glass-insights`) via `layout.switch` in Herdr App.
+3. Symlink or copy each folder in `mods/` into `~/.config/herdr-app/mods/`. No separate third-party install is needed; `insights` and `fleet-quota` stay outside the pack (see `PROVENANCE.md`).
+4. Merge the sections from `keys.fragment.json` into `~/.config/herdr-app/keys.json`.
+5. Select `omarchy-glass` (or `omarchy-glass-insights`) via `layout.switch` in Herdr App.
 
 ## Optional Helpers
 

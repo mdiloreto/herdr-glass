@@ -1,6 +1,7 @@
 {
   "id": "root",
   "link_handlers": [
+    "markdown-browser",
     "web-browser"
   ],
   "cloned_from": {

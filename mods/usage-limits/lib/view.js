@@ -3,7 +3,7 @@ import { isShown, inPanel, isFolded, spendOnBar, effectivePrefs } from "./prefs.
 import { PROVIDERS } from "../providers/index.js";
 
 const STALE_AFTER_S = 15 * 60;
-const NO_READING = "—";
+export const NO_READING = "—";
 const FAILED_MARK = "!";
 const LOADING_MARK = "…";
 
@@ -13,7 +13,7 @@ const fillOf = (percent) => Math.min(1, Math.max(0, percent / 100));
 const passed = (w, now) => w.resetsAt != null && w.resetsAt <= now;
 const isSpend = (p) => p.kind === "spend";
 const usedThisWeek = (reading) => reading?.spend?.week > 0;
-const isStale = (reading, now) => now - reading.observedAt > STALE_AFTER_S;
+export const isStale = (reading, now) => now - reading.observedAt > STALE_AFTER_S;
 const shownReading = (st) => (st?.report?.status === "ok" ? st.report : st?.lastGood ?? null);
 
 export function segmentView(w, now, showResetTime = false) {
@@ -208,7 +208,7 @@ function segmentWidth(s, density) {
   return density === DENSITY.NO_BARS ? label + text : label + SEGMENT_BAR_W + text;
 }
 
-const groupWidth = (g, density) => GROUP_W + (g.spend != null ? spendWidth(g) : 0) + g.segments.reduce((a, s) => a + segmentWidth(s, density), 0);
+export const groupWidth = (g, density) => GROUP_W + (g.spend != null ? spendWidth(g) : 0) + g.segments.reduce((a, s) => a + segmentWidth(s, density), 0);
 
 export function chooseDensity(model, widthPx, showBars = true) {
   const steps = showBars ? [DENSITY.FULL, DENSITY.NO_BARS, DENSITY.NO_LABELS, DENSITY.BRIEF] : [DENSITY.NO_BARS, DENSITY.NO_LABELS, DENSITY.BRIEF];

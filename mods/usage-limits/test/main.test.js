@@ -9,7 +9,8 @@ import { HERE, read } from "./_util.js";
 process.env.TZ = "UTC";
 const CLOCK_MS = Date.UTC(2026, 10, 4, 8, 0, 0);
 Date.now = () => CLOCK_MS;
-const { default: UsageLimits } = await import("../main.js");
+const { default: NativeUsageLimits } = await import("../main.js");
+class UsageLimits extends NativeUsageLimits { fleetSource() { return null; } }
 
 const SNAPSHOT = join(HERE, "fixtures", "main-snapshot.json");
 const CHOICE = "0a1b2c3d-0000-4000-8000-00000000000a";
@@ -55,7 +56,9 @@ function session({ helpers, terminal = null, shared = {}, props = null }) {
   resetHost();
   Object.assign(host.shared, shared);
   host.props = props;
-  host.focused = terminal ? { terminal: "t1" } : null;
+  host.focused = terminal ? { terminal: "t1", space: "local-space" } : null;
+  host.terminals = terminal ? [{ address: "t1" }] : [];
+  host.spaces = [{ id: "local-space", active: true, machine: null }];
   host.exec = answering(helpers, terminal);
   const cx = fakeCx();
   const view = new UsageLimits();
@@ -205,4 +208,68 @@ test("props.border false drops the line above the bar, for a layout whose status
     await s.frame("drawn");
     assert.equal(lined(s.frames[0].tree), want, JSON.stringify(props));
   }
+});
+
+test("session helper is never sent a remote or unclassified terminal, including on hover", async () => {
+  const s = session({ helpers: ALL_OK });
+  s.start();
+  for (const [spaces, focus] of [
+    [[{ id: "remote", machine: "arch-route", active: true }], { space: "remote", terminal: "arch-route/t1", pid: 77 }],
+    [[{ id: "local", machine: null, active: true }], { space: "local", terminal: "t1", shown: "arch-route/t1", pid: 77 }],
+    [[{ id: "unknown", active: true }], { space: "unknown", agent: "unknown-id", pid: 88 }],
+    [[{ id: "local", machine: null, active: true }], { space: "gone", terminal: "stale-id" }],
+    [[], { terminal: "unclassified-id" }],
+  ]) {
+    host.spaces = spaces;
+    host.focused = focus;
+    host.terminals = [{ address: "t1" }, { address: "arch-route/t1" }];
+    host.machines = [{ name: "arch-route" }];
+    await s.frame("unsafe focus");
+    await s.fire("ul-content", "on_hover", true);
+    assert.equal(s.view.terminal, null);
+    assert.equal(s.view.session, null);
+    if (focus.space === "remote") assert.match(JSON.stringify(s.frames.at(-1).tree), /Focused session unavailable on remote/);
+    assert.ok(s.frames.at(-1).execs.every(([bin]) => bin !== "hc"));
+    assert.ok(host.execs.every(([bin]) => bin !== "hc"));
+  }
+});
+
+test("a delayed local result is discarded when focus visits a remote and returns to the same local address", async () => {
+  resetHost();
+  const local = { id: "local", machine: null, active: true };
+  const remote = { id: "remote", machine: "arch", active: true };
+  host.spaces = [local];
+  host.focused = { space: "local", terminal: "t1" };
+  host.terminals = [{ address: "t1" }, { address: "arch/t1" }];
+  const started = Promise.withResolvers();
+  const delayed = Promise.withResolvers();
+  let sessionReads = 0;
+  host.exec = async (bin, args) => {
+    if (bin === "hc") return ok(JSON.stringify({ status: { app: "claude-code" }, foreground: { pid: 77 }, cwd: "/work" }));
+    assert.match(args[0], /session\.sh$/);
+    sessionReads += 1;
+    if (sessionReads === 1) {
+      started.resolve();
+      return delayed.promise;
+    }
+    return ok("tokens=50000 window=200000");
+  };
+  const cx = fakeCx();
+  const view = new (class extends UsageLimits { fetch() {} })();
+  view.init({}, cx);
+  view.render(cx);
+  await started.promise;
+  host.spaces = [remote];
+  host.focused = { space: "remote", terminal: "arch/t1", pid: 77 };
+  view.render(cx);
+  assert.equal(view.session, null);
+  assert.equal(sessionReads, 1);
+  host.spaces = [local];
+  host.focused = { space: "local", terminal: "t1" };
+  view.render(cx);
+  delayed.resolve(ok("tokens=10000 window=200000"));
+  await settle(cx);
+  assert.equal(sessionReads, 2);
+  assert.deepEqual(host.execs.filter(([bin]) => bin === "hc").map(([, args]) => args.at(-1)), ["t1", "t1"]);
+  assert.match(JSON.stringify(nodeOf(view.render(cx)).calls), /ctx 25%/);
 });

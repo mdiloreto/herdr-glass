@@ -16,10 +16,13 @@ function cardRow(r, providerId, t) {
     .when(r.detail !== "", (e) => e.child(div().text_size(11).text_color(t.dim).truncate().child(r.detail)));
 }
 
-function groupBody(g, t) {
+const ageLine = (age, t) => div().text_size(11).text_color(t.dim).child(age);
+
+function groupBody(g, t, scope) {
   const body = [];
-  if (g.age != null) body.push(div().text_size(11).text_color(t.dim).child(g.age));
-  body.push(v_flex().gap(6).opacity(g.dim ? DIMMED : 1).children(g.rows.map((r) => cardRow(r, g.providerId, t))));
+  if (g.age != null) body.push(ageLine(g.age, t));
+  const id = scope ? `${scope}-${g.providerId}` : g.providerId;
+  body.push(v_flex().gap(6).opacity(g.dim ? DIMMED : 1).children(g.rows.map((r) => cardRow(r, id, t))));
   return body;
 }
 
@@ -32,17 +35,18 @@ export function rightLabel(text, t) {
     .child(div().min_w(0).truncate().text_size(11).text_color(t.dim).child(text));
 }
 
-function header(g, arrows, panel) {
+function header(g, arrows, panel, scope) {
   const { t, act } = panel;
   const id = g.providerId;
   const arrow = g.folded ? "chevron-right" : "chevron-down";
-  return h_flex().id(`ul-head-${id}`).gap(6).items_center().cursor_pointer()
-    .on_hover((on, cx) => act.hoverHeader(id, on, cx))
-    .on_click((_e, cx) => act.fold(id, cx))
+  return h_flex().id(`ul-head-${scope ? `${scope}-` : ""}${id}`).gap(6).items_center()
+    .when(!scope, (e) => e.cursor_pointer()
+      .on_hover((on, cx) => act.hoverHeader(id, on, cx))
+      .on_click((_e, cx) => act.fold(id, cx)))
     .child(providerIcon(id, g.icon, t.foreground))
     .child(div().flex_none().font_semibold().child(g.name))
     .when(g.plan != null, (e) => e.child(div().flex_none().px(5).rounded(4).bg(t.raised).text_size(10).text_color(t.accent).child(g.plan)))
-    .when(g.folded || arrows || panel.hovered === id, (e) => e.child(svg(modIcon(arrow)).size(12).text_color(t.dim)));
+    .when(!scope && (g.folded || arrows || panel.hovered === id), (e) => e.child(svg(modIcon(arrow)).size(12).text_color(t.dim)));
 }
 
 function foldedNumbers(g, s, t) {
@@ -53,19 +57,20 @@ function foldedNumbers(g, s, t) {
     .child(numberCell(LEFT_COLUMN_W, s.left).opacity(opacity).text_size(11).text_color(t.dim));
 }
 
-function groupWithoutSummary(g, head, panel) {
+function groupWithoutSummary(g, head, panel, scope) {
   const { t } = panel;
-  if (g.folded && g.failed) return v_flex().gap(8).child(head.child(failure(g.status, t)));
+  if (g.folded && g.failed) return v_flex().gap(8).child(head.child(failure(g.status, t)))
+    .when(panel.showFailedAge && g.age != null, (e) => e.child(ageLine(g.age, t)));
   head.child(div().flex_1())
     .child(div().min_w(0).truncate().text_size(11).text_color(g.failed ? levelColor("hot", t) : t.dim).child(g.status));
   if (g.folded) return v_flex().gap(8).child(head);
-  return v_flex().gap(8).child(head).children(groupBody(g, t));
+  return v_flex().gap(8).child(head).children(groupBody(g, t, scope));
 }
 
-export function limitsGroup(g, arrows, panel) {
-  const head = header(g, arrows, panel);
+export function limitsGroup(g, arrows, panel, scope = null) {
+  const head = header(g, arrows, panel, scope);
   const s = g.folded ? g.summary : null;
-  if (!s) return groupWithoutSummary(g, head, panel);
+  if (!s) return groupWithoutSummary(g, head, panel, scope);
   const { t } = panel;
   return v_flex().gap(8).child(head
     .child(g.failed ? failure(g.status, t) : rightLabel(s.long, t))

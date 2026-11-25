@@ -4,6 +4,7 @@ import { SESSION_TITLE, iconButton, providerIcon, rule } from "./kit.js";
 import { panelShell } from "./panel.js";
 import { inPanel, isOnBar } from "../lib/prefs.js";
 import { settingsRows } from "../lib/settings.js";
+import { fableEnabled, isFable } from "../fleet/model.js";
 
 const PANEL_BOX_W = 40;
 const WINDOW_INDENT = 21;
@@ -76,13 +77,19 @@ function sessionChecks(prefs, act, t) {
     }));
 }
 
-export function settingsPanel(canGoBack, states, panel) {
+export function settingsPanel(canGoBack, states, panel, fable) {
   const { t, act, prefs } = panel;
+  const rows = settingsRows(prefs, states);
+  if (fable !== undefined) {
+    const claude = rows.find(({ provider }) => provider.id === "claude");
+    claude.windows = claude.windows.filter((window) => !isFable(window));
+    if (fable) claude.windows.push({ ...fable, on: fableEnabled(prefs) });
+  }
   return panelShell(panel)
     .child(header(canGoBack, act, t))
     .child(h_flex().items_center().text_size(11).text_color(t.dim)
       .child(div().child("Bar")).child(div().flex_1()).child(div().child("Panel")))
-    .child(v_flex().gap(1).children(settingsRows(prefs, states).flatMap((row) => providerChecks(row, act, t))))
+    .child(v_flex().gap(1).children(rows.flatMap((row) => providerChecks(row, act, t))))
     .child(rule(t))
     .child(check({ id: "opt-reset-time", on: prefs.showResetTime, label: [text("Always show time to reset", t.foreground)], onToggle: act.toggleResetTime }, t))
     .child(check({ id: "opt-bars", on: prefs.showBars, label: [text("Show bars", t.foreground)], onToggle: act.toggleBars }, t))

@@ -86,16 +86,13 @@ function visible(tree) { return nodes(tree).flatMap((node) => node.text); }
 
 function makeCx() {
   const cx = {
-    pending: [], timers: [], notified: 0, stopped: 0,
+    pending: [], notified: 0,
     spawn(task) {
       const promise = Promise.resolve().then(() => task(cx));
       cx.pending.push(promise);
       return promise;
     },
     notify() { cx.notified++; },
-    stop_propagation() { cx.stopped++; },
-    sleep() { return Promise.resolve(); },
-    timer: { every(ms, task) { cx.timers.push({ ms, task }); } },
   };
   return cx;
 }
@@ -184,13 +181,13 @@ before(async () => {
 });
 after(async () => { if (root) await fs.rm(root, { recursive: true, force: true }); });
 
-async function panel(state, options = {}) {
+async function panel(state) {
   const mod = new Mod(), cx = makeCx();
   mod.init({}, cx);
   mod.render(cx);
   await Promise.all(cx.pending);
   const tree = mod.render(cx);
-  return { mod, cx, tree, ...options };
+  return { mod, cx, tree };
 }
 
 test("local panel lists loopback servers once and hides internals", async () => {

@@ -42,10 +42,9 @@ function onePerPort(rows) {
   const skip = new Set(rows.filter((r) => hidden(r.name)).map((r) => r.port));
   const byPort = new Map();
   for (const { port, name, host } of rows) {
-    if (!port || skip.has(port)) continue;
+    if (skip.has(port)) continue;
     const seen = byPort.get(port);
-    if (!seen) byPort.set(port, { port, name: String(name), host });
-    else if (seen.host !== "localhost" && host === "localhost") byPort.set(port, { port, name: String(name), host });
+    if (!seen || (seen.host !== "localhost" && host === "localhost")) byPort.set(port, { port, name: String(name), host });
   }
   return [...byPort.values()].sort((a, b) => a.port - b.port);
 }

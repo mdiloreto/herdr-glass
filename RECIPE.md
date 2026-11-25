@@ -19,7 +19,7 @@ This repository packages the `omarchy-glass` and `omarchy-glass-insights` Herdr 
   - `omarchy.json`
   - `catppuccin.json`
 - `mods/` — every mod the layouts use: original mods, forks, and third-party mods shipped unchanged (see `PROVENANCE.md`). The third-party content is copied by `scripts/vendor.mjs` from the commits in `vendor.json`.
-- `keys.fragment.json` — recommended `layout:omarchy-glass*` and mod-scoped keybinding fragments.
+- `keys.fragment.json` — recommended `layout:omarchy-glass*` and mod-scoped keybinding fragments, plus a `terminal` section that hands `ctrl-n` and `ctrl-left`/`ctrl-right` to the focused program, so Neovim keeps completion and stays in insert mode (Herdr App bindings cannot depend on the program, herdrdev/herdr-app#745).
 
 ## Installation
 

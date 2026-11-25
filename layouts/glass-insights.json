@@ -5,7 +5,7 @@
     "web-browser"
   ],
   "cloned_from": {
-    "name": "omarchy-glass",
+    "name": "glass",
     "version": "0.1.16"
   },
   "type": "row",

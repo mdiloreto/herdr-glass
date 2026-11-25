@@ -32,7 +32,7 @@ The base commit is the closest match found, not a recorded fork point.
 
 ## Third-party mods shipped unchanged
 
-`scripts/vendor.mjs` copies these from upstream, unmodified, at the commits and paths recorded in [`vendor.json`](./vendor.json). Do not edit them here; change `vendor.json` and rerun the script. Mods marked `*` are referenced by `layouts/omarchy-glass.json` and `layouts/omarchy-glass-insights.json`.
+`scripts/vendor.mjs` copies these from upstream, unmodified, at the commits and paths recorded in [`vendor.json`](./vendor.json). Do not edit them here; change `vendor.json` and rerun the script. Mods marked `*` are referenced by `layouts/glass.json` and `layouts/glass-insights.json`.
 
 | Repo | License | Mods |
 | --- | --- | --- |
@@ -52,7 +52,7 @@ The base commit is the closest match found, not a recorded fork point.
 
 | Layout | Origin |
 | --- | --- |
-| `omarchy-glass`, `omarchy-glass-insights`, `omarchy`, `omarchy-next` | Ours (MIT). No upstream has them. |
+| `glass`, `glass-insights`, `omarchy`, `omarchy-next` | Ours (MIT). No upstream has them. |
 | `cockpit` | Third-party, shipped unchanged from `quaresc/cockpit` (`vendor.json`). |
 | `herdr-t3` | Third-party, shipped unchanged from `JinJieBeWater/herdr-t3` (`vendor.json`). |
 | `workspace` | Third-party, shipped unchanged from `tahadx/workspace` (`vendor.json`). |

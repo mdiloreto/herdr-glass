@@ -21,7 +21,7 @@ This repository packages the `glass` and `glass-insights` Herdr App layouts, the
 - `mods/` — every mod the layouts use: original mods, forks, and third-party mods shipped unchanged (see `PROVENANCE.md`). The third-party content is copied by `scripts/vendor.mjs` from the commits in `vendor.json`.
 - `requirements.json` — the programs the mods run, with install hints, plus the pinned `branch-pr` helper. `scripts/install.sh` reads it.
 - `scripts/install.sh` — installs the pack into the Herdr App home (see Installation).
-- `keys.fragment.json` — the `ctrl-space` prefix map (`ctrl-space ?` opens the cheatsheet), recommended `layout:glass*` and mod-scoped keybinding fragments, plus a `terminal` section that hands `ctrl-n` and `ctrl-left`/`ctrl-right` to the focused program, so Neovim keeps completion and stays in insert mode (Herdr App bindings cannot depend on the program, herdrdev/herdr-app#745). `ctrl-n` then no longer runs `agent.next` while a terminal has focus; bind `agent.next` to another key if you use it.
+- `keys.fragment.json` — the `ctrl-space` prefix map (`ctrl-space ?` opens the cheatsheet), recommended `layout:glass*` and mod-scoped keybinding fragments, plus a `terminal` section that hands `ctrl-n` to the focused program, so Neovim keeps completion (Herdr App bindings cannot depend on the program, herdrdev/herdr-app#745), and binds `ctrl-left`/`ctrl-right` everywhere to `tui-prefix.prev-subagent`/`next-subagent`, which cycle the focused coordinator and its sub-agents; programs no longer get those keys. The merge is add-only, so an existing keys.json keeps its own `ctrl-left`/`ctrl-right`. `ctrl-n` then no longer runs `agent.next` while a terminal has focus; bind `agent.next` to another key if you use it.
 
 ## Installation
 

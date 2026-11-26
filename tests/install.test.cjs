@@ -281,6 +281,8 @@ test("--yes installs a missing program through the system package manager", (t) 
 
 test("layout referencing a mod outside the pack warns", (t) => {
   const f = build(t);
+  assert.match(run(f, []).out, /warn\s+installed\.json not found/);
+  write(path.join(f.app, "installed.json"), JSON.stringify({ agents: {} }));
   const r = run(f, []);
   assert.match(r.out, /warn\s+layouts\/glass\.json needs mod nope/);
   assert.doesNotMatch(r.out, /needs mod alpha/);

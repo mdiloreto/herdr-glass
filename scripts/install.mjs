@@ -465,6 +465,10 @@ function checkMods(app, o, touched) {
 
 function layoutRefs(o, shipped) {
   head("Layout references");
+  if (!shipped.size) {
+    say("warn", "installed.json not found: start Herdr App once, then rerun to check layout references");
+    return;
+  }
   const known = new Set(listDir(path.join(packRoot, "mods")).map((e) => e.name));
   for (const k of shipped) if (!k.startsWith("layout:")) known.add(k);
   for (const e of listDir(path.join(o.appHome, "mods"))) known.add(e.name);

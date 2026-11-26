@@ -44,8 +44,8 @@ The base commit is the closest match found, not a recorded fork point.
 | `mrolafsson/herdr-recap` | MIT | `recap` |
 | `JinJieBeWater/herdr-t3` | Apache-2.0 | `t3-actions`, `t3-agents`, `t3-chrome`, `t3-home`, `t3-inbox`*, `t3-menu`, `t3-new-menu`, `t3-pane`, `t3-picker`, `t3-spaces`, `t3-tabs` |
 | `nozikov/herdr-usage-limits` | MIT | `usage-limits`* |
+| `mdiloreto/usage-insights` (fork of `harshcurious/usage-insights`) | MIT | `insights`* |
 
-`insights`* comes from `mdiloreto/usage-insights` (`mods/insights`) and is installed separately.
 `fleet-quota` stays in `dotfiles`.
 
 ## Layouts

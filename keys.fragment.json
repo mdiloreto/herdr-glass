@@ -74,6 +74,8 @@
     "ctrl-space down": "tui-prefix.next-agent",
     "ctrl-space ctrl-up": "tui-prefix.prev-agent",
     "ctrl-space ctrl-down": "tui-prefix.next-agent",
+    "ctrl-left": "tui-prefix.prev-subagent",
+    "ctrl-right": "tui-prefix.next-subagent",
     "ctrl-space b": "tui-prefix.toggle-sidebar",
     "ctrl-space f": "better-tabs.button:files",
     "ctrl-space d": "better-tabs.button:markdown",
@@ -134,7 +136,7 @@
   },
   "terminal": {
     "ctrl-n": "terminal",
-    "ctrl-left": "terminal",
-    "ctrl-right": "terminal"
+    "ctrl-left": "tui-prefix.prev-subagent",
+    "ctrl-right": "tui-prefix.next-subagent"
   }
 }

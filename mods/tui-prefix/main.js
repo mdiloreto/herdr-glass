@@ -172,6 +172,45 @@ function cycleAgent(delta) {
   }
 }
 
+// Live sub-agents of `addr`, depth first, in the sidebar's tree order (mods/rail-next/views/agents.js).
+function subAgents(all, addr) {
+  return all
+    .filter((k) => k.parent === addr && k.state === "live" && k.program?.agent)
+    .flatMap((k) => [k.address, ...subAgents(all, k.address)]);
+}
+
+// A peek leaves focus on the coordinator's pane, so remember which sub-agent it shows.
+let peekedSub = null;
+
+// Cycle through the focused coordinator and its sub-agents, which sidebarAgentOrder() leaves out.
+// Opens a sub-agent as the sidebar does: focus its pane if it has one, else peek at it.
+function cycleSubagent(delta) {
+  const order = sidebarAgentOrder();
+  const f = focused();
+  const allTerminals = terminals();
+  const byAddr = new Map(allTerminals.map((t) => [t.address, t]));
+
+  let topIdx = findInOrder(f?.terminal, order, byAddr);
+  if (topIdx < 0 && f?.agent) topIdx = findInOrder(f.agent, order, byAddr);
+  const coordinator = order[topIdx];
+  if (!coordinator) return;
+  const ring = [coordinator, ...subAgents(allTerminals, coordinator)];
+  if (ring.length < 2) return;
+
+  let idx = ring.indexOf(f?.terminal);
+  if (idx <= 0 && ring.includes(peekedSub)) idx = ring.indexOf(peekedSub);
+  const target = ring[(Math.max(idx, 0) + delta + ring.length) % ring.length];
+
+  if (target !== coordinator && !agents().some((a) => a.address === target)) {
+    peekedSub = target;
+    run("terminal.peek", { terminal: target });
+    return;
+  }
+  if (peekedSub) run("overlay.close", {});
+  peekedSub = null;
+  run(target === coordinator ? "agent.focus" : "pane.focus", { terminal: target });
+}
+
 function findNode(node, id) {
   if (node?.id === id) return node;
   for (const child of node?.children ?? []) {
@@ -344,6 +383,10 @@ export default class TuiPrefix extends View {
             cycleAgent(-1);
           } else if (cmd === "next-agent") {
             cycleAgent(1);
+          } else if (cmd === "prev-subagent") {
+            cycleSubagent(-1);
+          } else if (cmd === "next-subagent") {
+            cycleSubagent(1);
           } else if (cmd === "move-pane:left" || cmd === "move-pane-left") {
             moveFocusedPaneToNeighborTab("left");
           } else if (cmd === "move-pane:right" || cmd === "move-pane-right") {

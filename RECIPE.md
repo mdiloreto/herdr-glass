@@ -19,7 +19,7 @@ This repository packages the `glass` and `glass-insights` Herdr App layouts, the
   - `omarchy.json`
   - `catppuccin.json`
 - `mods/` — every mod the layouts use: original mods, forks, and third-party mods shipped unchanged (see `PROVENANCE.md`). The third-party content is copied by `scripts/vendor.mjs` from the commits in `vendor.json`.
-- `keys.fragment.json` — recommended `layout:glass*` and mod-scoped keybinding fragments.
+- `keys.fragment.json` — recommended `layout:glass*` and mod-scoped keybinding fragments, plus a `terminal` section that hands `ctrl-n` and `ctrl-left`/`ctrl-right` to the focused program, so Neovim keeps completion and stays in insert mode (Herdr App bindings cannot depend on the program, herdrdev/herdr-app#745). `ctrl-n` then no longer runs `agent.next` while a terminal has focus; bind `agent.next` to another key if you use it.
 
 ## Installation
 
@@ -42,7 +42,7 @@ HERDR_LAYOUT_ROOT=~/vscode/herdr-glass dotfiles-plugins sync --only herdr-glass
 1. Copy `layouts/*.json` and `layouts/*.svg` into `~/.config/herdr-app/layouts/`.
 2. Copy `themes/*.json` into `~/.config/herdr-app/themes/`.
 3. Symlink or copy each folder in `mods/` into `~/.config/herdr-app/mods/`. No separate third-party install is needed; `insights` and `fleet-quota` stay outside the pack (see `PROVENANCE.md`).
-4. Merge the sections from `keys.fragment.json` into `~/.config/herdr-app/keys.json`.
+4. Merge the sections from `keys.fragment.json` into `~/.config/herdr-app/keys.json`. Add the keys into a section that already exists (such as `terminal`) instead of replacing it, so its other bindings survive.
 5. Select `glass` (or `glass-insights`) via `layout.switch` in Herdr App.
 
 ## Optional Helpers

@@ -1,0 +1,88 @@
+{
+  "$comment": "Programs the pack's mods run. scripts/install.mjs reads this file; tests/requirements.test.cjs fails when a mod runs a program listed in neither programs nor system.",
+  "herdrApp": { "minVersion": "0.1.16" },
+  "system": ["cmd", "env", "find", "ls", "mdfind", "open", "osascript", "powershell", "powershell.exe", "ps", "pwd", "pwsh", "rm", "sh", "test", "xdg-open"],
+  "programs": {
+    "git": {
+      "why": "Branch, worktree and change views in most panels.",
+      "required": true,
+      "mods": ["agents-list", "better-changes", "better-files", "better-sidebar-rail", "branch-pr", "ci-dash", "cockpit", "goto", "icons", "markdown-browser", "preview-plus", "rail-next", "space-folders", "space-folders-next", "t3-agents", "t3-inbox", "t3-menu", "t3-new-menu", "t3-picker", "t3-spaces", "usage-limits", "worktrees"],
+      "install": { "brew": "git", "pacman": "git", "apt": "git", "dnf": "git" }
+    },
+    "gh": {
+      "why": "Pull request and CI panels.",
+      "required": true,
+      "mods": ["better-sidebar-rail", "ci-dash", "goto", "rail-next", "tui-goto"],
+      "install": { "brew": "gh", "pacman": "github-cli", "apt": "gh", "dnf": "gh", "hint": "https://cli.github.com, then run gh auth login" }
+    },
+    "node": {
+      "why": "Runs the Insights scanner.",
+      "required": true,
+      "version": { "min": "22.15.0" },
+      "mods": ["insights"],
+      "install": { "brew": "node", "pacman": "nodejs", "dnf": "nodejs", "hint": "Node.js 22.15 or newer from https://nodejs.org or a version manager such as mise" }
+    },
+    "python3": {
+      "why": "Prompt timeline parsing.",
+      "required": true,
+      "mods": ["over9k-prompts"],
+      "install": { "brew": "python", "pacman": "python", "apt": "python3", "dnf": "python3" }
+    },
+    "hc": {
+      "why": "Terminal details for the usage-limits bar.",
+      "required": true,
+      "mods": ["usage-limits"],
+      "install": { "hint": "Ships with Herdr App as herdr-core; reinstall or update Herdr App if hc is not on PATH." }
+    },
+    "terminal-browser": {
+      "why": "Opens web pages in a terminal pane (Web panel).",
+      "required": true,
+      "mods": ["web-browser"],
+      "install": { "brewCask": "terminal-browser", "script": "https://terminal-browser.sh/install", "env": { "TERMINAL_BROWSER_SKIP_SETUP": "1" }, "hint": "https://terminal-browser.sh" }
+    },
+    "lsof": {
+      "why": "Finds local dev servers for the Web panel.",
+      "required": true,
+      "os": ["darwin"],
+      "mods": ["web-browser"],
+      "install": { "hint": "Part of macOS." }
+    },
+    "ss": {
+      "why": "Finds local dev servers for the Web panel.",
+      "required": true,
+      "os": ["linux"],
+      "mods": ["web-browser"],
+      "install": { "pacman": "iproute2", "apt": "iproute2", "dnf": "iproute" }
+    },
+    "go": {
+      "why": "Builds the branch-pr helper (herdr-pr); needed only until it is built.",
+      "required": false,
+      "mods": ["branch-pr"],
+      "install": { "brew": "go", "pacman": "go", "apt": "golang-go", "dnf": "golang", "hint": "https://go.dev/dl" }
+    },
+    "herdr": {
+      "why": "GitHub actions in the tui-prefix overlay (Herdr TUI with the herdr-github plugin).",
+      "required": false,
+      "mods": ["tui-prefix"],
+      "install": { "hint": "Herdr TUI with the herdr-github plugin; only tui-prefix's GitHub actions use it." }
+    },
+    "code": {
+      "why": "Open in VS Code button in cockpit.",
+      "required": false,
+      "mods": ["cockpit"],
+      "install": { "hint": "Install VS Code and its code shell command." }
+    }
+  },
+  "helpers": {
+    "branch-pr": {
+      "why": "Go bridge (herdr-pr) the branch-pr mod calls for GitHub data.",
+      "mod": "branch-pr",
+      "repo": "munza/herdr-mods",
+      "commit": "9bd1f7e9a55a264563bfd82d2552502fda1cca6d",
+      "package": "branch-pr/helper",
+      "binary": "bin/herdr-pr",
+      "stamp": "bin/.herdr-pr.rev",
+      "needs": ["git", "go"]
+    }
+  }
+}

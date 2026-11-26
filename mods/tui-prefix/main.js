@@ -6,7 +6,6 @@ import {
   exec,
   focused,
   hc,
-  home,
   layout,
   nextCommand,
   notify,
@@ -96,24 +95,80 @@ function orderedAgents() {
 }
 
 // Prefer the order the sidebar shows (published as shared "agents.order").
-function focusAgentByIndex(index1Based) {
+function sidebarAgentOrder() {
   const published = shared("agents.order");
+  const allAgents = agents();
+  const allTerminals = terminals();
+  const live = new Set([...allAgents, ...allTerminals].map((a) => a.address));
   if (
     published?.layout === shared("layout") &&
     Array.isArray(published.order) &&
     published.order.length > 0
   ) {
-    const address = published.order[index1Based - 1];
-    const live = new Set([...agents(), ...terminals()].map((a) => a.address));
-    if (address && live.has(address)) {
-      run("agent.focus", { terminal: address });
-      return;
-    }
+    const filtered = published.order.filter((addr) => live.has(addr));
+    if (filtered.length > 0) return filtered;
   }
-  const list = orderedAgents();
-  const target = list[index1Based - 1];
-  if (target?.address) {
-    run("agent.focus", { terminal: target.address });
+  return orderedAgents().map((a) => a.address);
+}
+
+// Match the terminal directly in `order` first; only walk up `parent` if it isn't a top-level
+// entry (e.g. a peeked pane-less sub-agent). Agents spawned via herdr-spawn keep `parent` pointing
+// at their spawner (or a shell) even when they have their own tab/pane in the sidebar list.
+function findInOrder(address, order, byAddr) {
+  let cur = address;
+  const seen = new Set();
+  while (cur && !seen.has(cur)) {
+    const idx = order.indexOf(cur);
+    if (idx >= 0) return idx;
+    seen.add(cur);
+    cur = byAddr.get(cur)?.parent;
+  }
+  return -1;
+}
+
+function focusAgentByIndex(index1Based) {
+  const order = sidebarAgentOrder();
+  const target = order[index1Based - 1];
+  if (target) {
+    run("agent.focus", { terminal: target });
+  }
+}
+
+// Cycle through sidebar agents in displayed order, anchored on the actually focused pane/tab
+// rather than AppWindow::shown_agent()'s cached agent or root_agent() (which both break for
+// herdr-spawn agents whose `parent` is another agent or a shell).
+function cycleAgent(delta) {
+  const order = sidebarAgentOrder();
+  if (order.length === 0) return;
+
+  const f = focused();
+  const allTerminals = terminals();
+  const byAddr = new Map(allTerminals.map((t) => [t.address, t]));
+  const allAgents = agents();
+
+  let idx = findInOrder(f?.terminal, order, byAddr);
+
+  if (idx < 0 && f?.tab) {
+    const tabAgent = allAgents.find(
+      (a) => a.tab === f.tab && order.includes(a.address),
+    );
+    if (tabAgent) idx = order.indexOf(tabAgent.address);
+  }
+
+  if (idx < 0 && f?.agent) {
+    idx = findInOrder(f.agent, order, byAddr);
+  }
+
+  const nextIdx =
+    idx >= 0
+      ? (idx + delta + order.length) % order.length
+      : delta > 0
+        ? 0
+        : order.length - 1;
+
+  const target = order[nextIdx];
+  if (target) {
+    run("agent.focus", { terminal: target });
   }
 }
 
@@ -233,8 +288,8 @@ const BINDINGS = [
   ["L", "Swap right", "pane.swap", { direction: "right" }],
   ["ctrl+h", "Move pane left tab", "__custom__", "move-pane:left"],
   ["ctrl+l", "Move pane right tab", "__custom__", "move-pane:right"],
-  ["up", "Previous agent", "agent.prev"],
-  ["down", "Next agent", "agent.next"],
+  ["up", "Previous agent", "__custom__", "prev-agent"],
+  ["down", "Next agent", "__custom__", "next-agent"],
   ["alt+n", "New space", "space.new"],
   ["N", "New space in ~", "space.new", { folder: "" }],
   ["W", "Rename space", "space.rename"],
@@ -285,6 +340,10 @@ export default class TuiPrefix extends View {
           if (cmd.startsWith("focus-agent:")) {
             const n = parseInt(cmd.slice("focus-agent:".length), 10);
             if (n >= 1) focusAgentByIndex(n);
+          } else if (cmd === "prev-agent") {
+            cycleAgent(-1);
+          } else if (cmd === "next-agent") {
+            cycleAgent(1);
           } else if (cmd === "move-pane:left" || cmd === "move-pane-left") {
             moveFocusedPaneToNeighborTab("left");
           } else if (cmd === "move-pane:right" || cmd === "move-pane-right") {
@@ -339,6 +398,8 @@ export default class TuiPrefix extends View {
     this.dismiss();
     if (!binding) return;
     if (binding[2] === "__custom__") {
+      if (binding[3] === "prev-agent") cycleAgent(-1);
+      if (binding[3] === "next-agent") cycleAgent(1);
       if (binding[3] === "move-pane:left") moveFocusedPaneToNeighborTab("left");
       if (binding[3] === "move-pane:right") moveFocusedPaneToNeighborTab("right");
       if (binding[3] === "toggle-sidebar") toggleSidebarRail();

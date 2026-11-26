@@ -28,7 +28,7 @@ A read-only tree of the focused pane's folder with git status marks and a file v
 
 ### Markdown
 
-Lists the repository's Markdown files (outside a repository, those up to four folders deep) and the ones your terminal mentioned. Opens a rendered preview beside the pane, with a source view that can edit and save files on this machine.
+Lists the repository's Markdown files (outside a repository, those up to three folders deep) and the ones your terminal mentioned. Opens a rendered preview beside the pane, with a source view that can edit and save files on this machine.
 
 ![A rendered README beside an agent, with the Markdown file list](docs/images/markdown.webp)
 
@@ -72,9 +72,9 @@ A token dashboard built from Claude Code, Codex, OpenCode, Pi and Antigravity lo
 
 - `ctrl-space w` picks a space and `ctrl-space alt-t` shows the session tree.
 - `ctrl-space ?` shows a cheat sheet of prefix keys. It does not list the keys specific to `glass`; see [`keys.fragment.json`](./keys.fragment.json).
-- `ctrl-space r` shows every agent grouped by stage, with recaps for Claude Code sessions. Opening it downloads [herdr-recap](https://github.com/mrolafsson/herdr-recap) (with `curl`, from its GitHub releases) onto each machine running Claude Code, and has it write out-of-date recaps by asking Claude under your account.
+- `ctrl-space r` shows every agent grouped by stage, with recaps for Claude Code sessions. Opening it downloads the [herdr-recap](https://github.com/mrolafsson/herdr-recap) program from its GitHub releases onto each machine running Claude Code, checks its checksum, runs it, and has it write out-of-date recaps by asking Claude under your account.
 - On Linux, a desktop notification tells you when an agent needs you or finishes.
-- When a terminal on this machine comes back as a bare shell, for example after a restart, the pack types the command that resumes its Claude Code session. This needs the `claude.session` terminal label, set by a statusline or hook that the pack does not ship.
+- When a terminal on this machine comes back as a bare shell, for example after a restart, the pack types and runs the command that resumes its Claude Code session. This needs the `claude.session` terminal label, set by a statusline or hook that the pack does not ship.
 - Tabs name themselves after what runs in them. Read [what that sends](#what-tab-naming-does-and-sends).
 
 <img src="docs/images/tree.webp" alt="Session tree listing spaces, tabs and agents with a terminal preview" width="720">
@@ -96,7 +96,7 @@ The `agent-names` mod runs in the background of the `glass`, `glass-insights`, `
 3. `claude` (Haiku)
 4. for a tab on another machine, `claude` on that machine
 
-Every tool it tries receives the text, even if its answer is not used, and passes it to that tool's provider under your account. If none gives a name, a local rule does. After an `agy` call the mod deletes the conversation files that call created; `agy` keeps a summary entry.
+Every tool it tries receives the text, even if its answer is not used, and passes it to that tool's provider under your account. If none gives a name, a local rule does. After an `agy` call the mod deletes that conversation's files when `agy` reports its id; otherwise they stay. `agy` keeps a summary entry either way. `claude` is run without saving a session, and the mod removes nothing that `opencode` stores.
 
 **Tab cleanup.** The mod marks unused shell tabs on this machine `· stale` and closes them after 24 hours of the app running, never the focused tab or a space's last one. It logs closed tabs to `~/.local/state/herdr-tab-cleanup.log`.
 
@@ -107,6 +107,8 @@ herdr-app do layout.hide --id agent-names-daemon
 ```
 
 Repeat it in each layout you use (`glass`, `glass-insights`, `omarchy`, `omarchy-next`). `layout.show` with the same `--id` turns it back on.
+
+Naming starts as soon as you switch to the layout. To send nothing at all, delete the `agent-names-daemon` block from the layout's file in `~/.config/herdr-app/layouts/` after installing and before switching to it. The installer then treats that file as edited and no longer updates it.
 
 ## Install
 
@@ -151,6 +153,7 @@ Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing
 | `terminal-browser` | Web pages, on the machine that opens them. On Linux its installer may ask for extra system libraries |
 | `lsof` on this machine, `ss` on remote Linux machines | The Web panel's port list |
 | `notify-send`, `setsid` | Desktop notifications on Linux |
+| `curl` | Recap, and terminal-browser's installer |
 | Go | Building the pull request helper once |
 
 ## Customize
@@ -159,7 +162,7 @@ Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing
 - **Themes.** The pack adds `omarchy` and `catppuccin`: `herdr-app do app.theme --name catppuccin`.
 - **Your own copy.** `herdr-app do layout.clone --name glass --as my-glass`, then edit `layouts/my-glass.json` in `~/.config/herdr-app`: colors, gradient, `window_blur`, panel buttons. To keep the layout's own keys, copy the `layout:glass` section of `keys.json` to `layout:my-glass`.
 - **Hide a block.** `herdr-app do layout.hide --id usage-limits`.
-- **Keys.** [`keys.fragment.json`](./keys.fragment.json) lists every binding the pack adds. It also hands `ctrl-n`, `ctrl-left` and `ctrl-right` to the terminal program (your own bindings win), so `ctrl-n` no longer jumps to the next agent while a terminal has focus.
+- **Keys.** [`keys.fragment.json`](./keys.fragment.json) lists every binding the pack adds. It also hands `ctrl-n`, `ctrl-left` and `ctrl-right` to the terminal program (your own bindings win), so `ctrl-n` no longer jumps to the next agent while a terminal has focus. The GitHub keys `ctrl-space alt-o` and `alt-p` need the Herdr terminal app with its `herdr-github` plugin.
 
 Other layouts in the pack:
 

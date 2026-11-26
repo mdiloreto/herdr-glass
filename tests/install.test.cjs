@@ -333,7 +333,7 @@ function fakeGitAndGo(f, goBody) {
   fs.rmSync(path.join(f.bin, "git"));
   write(
     path.join(f.bin, "git"),
-    `#!/bin/sh\necho "$1 GIT_DIR=\${GIT_DIR-unset}" >> "${f.log}.git"\n[ "$1" = checkout ] && mkdir -p branch-pr/helper\nexit 0\n`,
+    `#!/bin/sh\necho "$1 GIT_DIR=\${GIT_DIR-unset} CA=\${GIT_SSL_CAINFO-unset}" >> "${f.log}.git"\n[ "$1" = checkout ] && mkdir -p branch-pr/helper\nexit 0\n`,
     0o755,
   );
   write(path.join(f.bin, "go"), `#!/bin/sh\n${goBody}\n`, 0o755);
@@ -343,18 +343,18 @@ test("helper builds with a clean git env, stamps it, and cleans up on failure", 
   const f = build(t);
   const binDir = path.join(f.app, "mods", "branch-pr", "bin");
   fakeGitAndGo(f, 'echo boom >&2; exit 1');
-  const bad = run(f, ["--apply"], { env: { GIT_DIR: "/nonexistent" } });
+  const bad = run(f, ["--apply"], { env: { GIT_DIR: "/nonexistent", GIT_SSL_CAINFO: "/ca.pem" } });
   assert.match(bad.out, /failed\s+branch-pr: .*boom/);
   assert.deepEqual(fs.existsSync(binDir) ? fs.readdirSync(binDir) : [], []);
 
   fakeGitAndGo(f, `printf '#!/bin/sh\\n' > "$3"; chmod +x "$3"`);
-  const ok = run(f, ["--apply"], { env: { GIT_DIR: "/nonexistent" } });
+  const ok = run(f, ["--apply"], { env: { GIT_DIR: "/nonexistent", GIT_SSL_CAINFO: "/ca.pem" } });
   assert.equal(ok.status, 0, ok.out);
   assert.ok(fs.existsSync(path.join(binDir, "herdr-pr")));
   assert.equal(read(binDir, ".herdr-pr.rev"), `${COMMIT}\n`);
   const gitLog = read(`${f.log}.git`).trim().split("\n");
   assert.ok(gitLog.length >= 3);
-  assert.ok(gitLog.every((l) => l.endsWith("GIT_DIR=unset")), gitLog.join("\n"));
+  assert.ok(gitLog.every((l) => l.endsWith("GIT_DIR=unset CA=/ca.pem")), gitLog.join("\n"));
 });
 
 test("keys.json symlink and mode survive the merge", (t) => {
@@ -432,4 +432,31 @@ test("one item failing to copy does not stop the rest or the manifest", (t) => {
   const after = JSON.parse(read(f.app, ".herdr-glass.json"));
   assert.deepEqual(after.items["mods/alpha"], before.items["mods/alpha"]);
   assert.notDeepEqual(after.items["mods/insights"], before.items["mods/insights"]);
+});
+
+test("a copy that fails partway is recorded, so the next run finishes it", (t) => {
+  const f = build(t);
+  // The temp name of an over-long file name exceeds the limit, so only that copy fails.
+  const long = `${"x".repeat(250)}.js`;
+  write(path.join(f.pack, "mods", "alpha", "a.js"), "a\n");
+  write(path.join(f.pack, "mods", "alpha", long), "b\n");
+  const one = run(f, ["--apply"]);
+  assert.match(one.out, /failed\s+mods\/alpha: /);
+  fs.renameSync(path.join(f.pack, "mods", "alpha", long), path.join(f.pack, "mods", "alpha", "b.js"));
+  run(f, ["--apply"]);
+  assert.equal(read(f.app, "mods/alpha/b.js"), "b\n");
+  const three = run(f, ["--apply"]);
+  assert.doesNotMatch(three.out, /^ +(skip|failed) /m);
+  assert.match(three.out, /ok\s+mods\/alpha/);
+});
+
+test("a symlink inside a pack mod is installed as a symlink and stays ok", (t) => {
+  const f = build(t);
+  write(path.join(f.pack, "mods", "alpha", "a.js"), "a\n");
+  fs.symlinkSync("a.js", path.join(f.pack, "mods", "alpha", "c"));
+  run(f, ["--apply"]);
+  const two = run(f, ["--apply"]);
+  assert.match(two.out, /ok\s+mods\/alpha/);
+  assert.doesNotMatch(two.out, /^ +skip /m);
+  assert.equal(fs.readlinkSync(path.join(f.app, "mods", "alpha", "c")), "a.js");
 });

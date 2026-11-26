@@ -191,7 +191,7 @@ function pickInstaller(spec) {
       if (i[key] && onPath(bin)) return { cmd: [...sudo, bin, ...args, i[key]] };
     }
   }
-  if (i.script) return { cmd: ["sh", "-c", 'f=$(mktemp) || exit 1; curl -fsSL "$1" -o "$f" && bash "$f"; s=$?; rm -f "$f"; exit $s', "sh", i.script], env: i.env, label: `curl -fsSL ${i.script} | bash` };
+  if (i.script) return { cmd: ["sh", "-c", 'f=$(mktemp) || exit 1; curl -fsSL "$1" -o "$f" && bash "$f"; s=$?; rm -f "$f"; exit $s', "sh", i.script], env: i.env, label: `download ${i.script}, then bash it` };
   return null;
 }
 
@@ -286,7 +286,13 @@ function syncItem(it, o, items) {
       items[it.key] = { type: "link" };
       return;
     }
-    for (const rel of Object.keys(s)) if (have[rel] !== s[rel]) atomicCopy(rel ? path.join(S, rel) : S, rel ? path.join(T, rel) : T);
+    for (const rel of Object.keys(s)) {
+      if (have[rel] === s[rel]) continue;
+      const src = rel ? path.join(S, rel) : S;
+      const dst = rel ? path.join(T, rel) : T;
+      if (s[rel].startsWith("link:")) viaTemp(dst, (tmp) => fs.symlinkSync(fs.readlinkSync(src), tmp));
+      else atomicCopy(src, dst);
+    }
     for (const rel of Object.keys(have)) {
       if (rel in s) continue;
       fs.rmSync(path.join(T, rel), { force: true });
@@ -340,6 +346,13 @@ function syncItems(o, shipped, manifest) {
         r.act?.();
       } catch (e) {
         say("failed", `${it.key}: ${e.message}`);
+        // What is on disk was written by this run or was owned and unedited, so record it:
+        // otherwise the next run sees a foreign or locally edited item and never finishes the copy.
+        try {
+          const T = path.join(o.appHome, it.key);
+          const l = lstat(T);
+          if (l && !l.isSymbolicLink() && l.isDirectory() === (it.type === "dir")) manifest.items[it.key] = ownedRecord(it, snap(T, it.type));
+        } catch {}
         continue;
       }
     }
@@ -391,10 +404,10 @@ function syncKeys(o) {
   }
   say("install", `keys.json: ${added} binding(s) added, ${conflicts.length} conflict(s) kept`);
   if (!apply) return;
-  if (had) fs.copyFileSync(file, `${file}.bak-herdr-glass-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}`);
   // Write through a symlink and keep the mode: keys.json may be managed elsewhere and private.
   const target = realOr(file, file);
   try {
+    if (had) fs.copyFileSync(file, `${file}.bak-herdr-glass-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}`);
     atomicWrite(target, `${JSON.stringify(keys, null, 2)}\n`, had ? fs.statSync(target).mode & 0o777 : undefined);
   } catch (e) {
     say("failed", `keys.json: ${e.message}`);
@@ -403,11 +416,18 @@ function syncKeys(o) {
 
 // ---- 5. helpers ------------------------------------------------------------
 
+const REPO_ENV = [
+  "GIT_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX",
+  "GIT_SHALLOW_FILE", "GIT_GRAFT_FILE", "GIT_REPLACE_REF_BASE", "GIT_NO_REPLACE_OBJECTS",
+];
+
 function buildHelper(h, bin, stamp) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "herdr-glass-"));
   const run = (cmd, args, cwd, env = {}) => {
-    // An inherited GIT_DIR would make git act on that repo instead of the temp dir.
-    const base = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
+    // An inherited GIT_DIR would make git act on that repo instead of the temp dir. Only the
+    // repo-selecting variables go: proxy, CA and credential settings must still reach the fetch.
+    const base = Object.fromEntries(Object.entries(process.env).filter(([k]) => !REPO_ENV.includes(k)));
     const r = spawnSync(cmd, args, { cwd, env: { ...base, ...env }, encoding: "utf8" });
     if (r.status !== 0) throw new Error(`${cmd} ${args[0]} failed: ${(r.stderr || r.error?.message || "").trim()}`);
   };

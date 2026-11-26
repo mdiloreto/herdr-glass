@@ -1,6 +1,6 @@
 {
-  "$comment": "Recommended Herdr App keybinding fragments for omarchy-glass. Merge into ~/.config/herdr-app/keys.json (dotfiles owns the full keys.json.tmpl).",
-  "layout:omarchy-glass": {
+  "$comment": "Recommended Herdr App keybinding fragments for glass. Merge into ~/.config/herdr-app/keys.json (dotfiles owns the full keys.json.tmpl).",
+  "layout:glass": {
     "alt-down": "space-folders-next.next",
     "alt-up": "space-folders-next.prev",
     "ctrl-shift-pagedown": "space-folders-next.next",
@@ -14,7 +14,7 @@
     "ctrl-space B": "better-tabs.button:web",
     "ctrl-space shift-b": "better-tabs.button:web"
   },
-  "layout:omarchy-glass-insights": {
+  "layout:glass-insights": {
     "alt-down": "space-folders-next.next",
     "alt-up": "space-folders-next.prev",
     "ctrl-shift-pagedown": "space-folders-next.next",

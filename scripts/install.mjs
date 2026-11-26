@@ -218,7 +218,7 @@ function checkPrograms(req) {
     if (spec.os && !spec.os.includes(process.platform)) continue;
     const r = findProgram(name, spec);
     if (r.ok) {
-      say("ok", `${name}`);
+      say("ok", name);
       continue;
     }
     missing.push({ name, spec });

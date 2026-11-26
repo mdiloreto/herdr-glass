@@ -9,6 +9,7 @@ Licenses and attribution: [`LICENSE`](./LICENSE), [`NOTICE`](./NOTICE), [`LICENS
 | `agent-names` | Zero-size daemon syncing agent names. |
 | `agent-resume` | Runtime `${HERDR_CLAUDE_BIN:-claude}` resume daemon (portable, no templates). |
 | `goto` | Workspace/tab jump and move daemon plus overlay. |
+| `quota-resume` | Zero-size daemon detecting rate-limited Claude Code, Codex, and OpenCode sessions (local and fleet) and resuming them after quota reset. |
 | `tui-goto` | Tree session navigator overlay. |
 | `tui-prefix` | Ctrl+Space TUI prefix daemon and cheatsheet overlay. |
 | `tui-spaces` | Spaces picker overlay. |

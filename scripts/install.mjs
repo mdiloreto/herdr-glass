@@ -394,7 +394,11 @@ function syncKeys(o) {
   if (had) fs.copyFileSync(file, `${file}.bak-herdr-glass-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}`);
   // Write through a symlink and keep the mode: keys.json may be managed elsewhere and private.
   const target = realOr(file, file);
-  atomicWrite(target, `${JSON.stringify(keys, null, 2)}\n`, had ? fs.statSync(target).mode & 0o777 : undefined);
+  try {
+    atomicWrite(target, `${JSON.stringify(keys, null, 2)}\n`, had ? fs.statSync(target).mode & 0o777 : undefined);
+  } catch (e) {
+    say("failed", `keys.json: ${e.message}`);
+  }
 }
 
 // ---- 5. helpers ------------------------------------------------------------

@@ -369,6 +369,20 @@ test("keys.json symlink and mode survive the merge", (t) => {
   assert.equal(fs.statSync(real).mode & 0o777, 0o600);
 });
 
+test("keys.json linked into a read-only dir fails that step, not the run", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root ignores directory permissions");
+  const f = build(t);
+  const ro = path.join(f.tmp, "ro");
+  write(path.join(ro, "keys.json"), "{}\n");
+  fs.chmodSync(ro, 0o555);
+  fs.mkdirSync(f.app, { recursive: true });
+  fs.symlinkSync(path.join(ro, "keys.json"), path.join(f.app, "keys.json"));
+  const r = run(f, ["--apply"]);
+  fs.chmodSync(ro, 0o755);
+  assert.match(r.out, /failed\s+keys\.json: EACCES/);
+  assert.ok(fs.existsSync(path.join(f.app, ".herdr-glass.json")));
+});
+
 test("script installer does not run a failed download", (t) => {
   const f = build(t);
   editReq(f, (r) => {

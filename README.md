@@ -4,6 +4,10 @@ Standalone Herdr App layout repository for `glass` and `glass-insights` and othe
 
 See [`RECIPE.md`](./RECIPE.md) for installation and sync instructions and [`PROVENANCE.md`](./PROVENANCE.md) for mod attribution and provenance.
 
+## Install
+
+Run `scripts/install.sh` for a report of what is missing, then `scripts/install.sh --apply` to install the pack. See [`RECIPE.md`](./RECIPE.md) for the options.
+
 ## Validation
 
 Validate mods with the Herdr App checker:
@@ -16,6 +20,12 @@ On macOS:
 
 ```bash
 /Applications/Herdr.app/Contents/MacOS/Herdr check mods/<mod-name>
+```
+
+Run the pack's tests, including the check that `requirements.json` lists every program the mods run:
+
+```bash
+node --test tests/*.test.cjs
 ```
 
 ## License

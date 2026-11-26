@@ -94,5 +94,13 @@
     "paths": {
       "mods/usage-limits": "mods/usage-limits"
     }
+  },
+  {
+    "repo": "mdiloreto/usage-insights",
+    "commit": "d15d3429711a30a7c12914333dfee47feed4091e",
+    "license": "MIT",
+    "paths": {
+      "mods/insights": "mods/insights"
+    }
   }
 ]

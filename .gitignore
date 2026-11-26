@@ -5,4 +5,3 @@ node_modules/
 mods/*/bin/
 mods/insights/runtime.json
 .worktrees/
-mods/**/*.d.ts

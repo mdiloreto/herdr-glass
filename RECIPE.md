@@ -11,7 +11,7 @@ This repository packages the `omarchy-glass` and `omarchy-glass-insights` Herdr 
 ## Contents
 
 - `layouts/`
-  - `omarchy-glass.json` — main translucent glass layout with sidebar rail, T3 inbox stack, right panel (`better-files`, `better-changes`, `markdown-browser`, `branch-pr`, `ci-dash`, `over9k-prompts`), `usage-limits` bar, and background daemons (`tui-prefix`, `agent-names`, `agent-resume`, `goto`).
+  - `omarchy-glass.json` — main translucent glass layout with sidebar rail, T3 inbox stack, right panel (`better-files`, `better-changes`, `markdown-browser`, `web-browser`, `branch-pr`, `ci-dash`, `over9k-prompts`), `usage-limits` bar, and background daemons (`tui-prefix`, `agent-names`, `agent-resume`, `goto`).
   - `omarchy-glass-insights.json` — variant with compact sidebar footer height tuned for Insights workflows.
   - `omarchy.json`, `omarchy-next.json` — our other layouts.
   - `cockpit.json`, `herdr-t3.json` (+ `herdr-t3.svg`), `workspace.json` (+ `workspace.svg`) — third-party layouts shipped unchanged. The `.svg` files are layout previews and are copied with the `.json`.
@@ -48,6 +48,7 @@ HERDR_LAYOUT_ROOT=~/vscode/herdr-omarchy-glass dotfiles-plugins sync --only herd
 ## Optional Helpers
 
 - **`branch-pr` Go helper (`mods/branch-pr/bin/herdr-pr`):** Built per OS from the pinned commit of `munza/herdr-mods` (managed automatically by `dotfiles`'s `run_after_install-herdr-pr-helper.sh.tmpl`).
+- **`web-browser`:** Needs `terminal-browser` on each machine that opens pages (`brew install --cask terminal-browser` on macOS, `curl -fsSL https://terminal-browser.sh/install | bash` on Linux).
 - **`fleet-quota`:** Intentionally kept in `dotfiles` (not this repo) because it is tightly coupled to the Linux `herdr-fleet-quota-refresh` systemd producer.
 
 ## License

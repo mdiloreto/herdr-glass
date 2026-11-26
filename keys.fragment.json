@@ -9,7 +9,10 @@
     "ctrl-shift-k": "mod.open:goto",
     "ctrl-space m": "goto.move-tab",
     "ctrl-space M": "goto.move-space",
-    "ctrl-space shift-m": "goto.move-space"
+    "ctrl-space shift-m": "goto.move-space",
+    "cmd-shift-b": "better-tabs.button:web",
+    "ctrl-space B": "better-tabs.button:web",
+    "ctrl-space shift-b": "better-tabs.button:web"
   },
   "layout:omarchy-glass-insights": {
     "alt-down": "space-folders-next.next",
@@ -20,7 +23,10 @@
     "ctrl-shift-k": "mod.open:goto",
     "ctrl-space m": "goto.move-tab",
     "ctrl-space M": "goto.move-space",
-    "ctrl-space shift-m": "goto.move-space"
+    "ctrl-space shift-m": "goto.move-space",
+    "cmd-shift-b": "better-tabs.button:web",
+    "ctrl-space B": "better-tabs.button:web",
+    "ctrl-space shift-b": "better-tabs.button:web"
   },
   "mod:tui-prefix": {
     "ctrl-space": "tui-prefix.send-prefix"

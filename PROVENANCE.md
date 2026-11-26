@@ -12,6 +12,7 @@ Licenses and attribution: [`LICENSE`](./LICENSE), [`NOTICE`](./NOTICE), [`LICENS
 | `tui-goto` | Tree session navigator overlay. |
 | `tui-prefix` | Ctrl+Space TUI prefix daemon and cheatsheet overlay. |
 | `tui-spaces` | Spaces picker overlay. |
+| `web-browser` | Web pages in a terminal pane beside the agent, via `terminal-browser`. |
 | `where` | Active machine/space breadcrumb. |
 
 ## Forked mods shipped here

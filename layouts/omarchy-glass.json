@@ -1,5 +1,9 @@
 {
   "id": "root",
+  "link_handlers": [
+    "markdown-browser",
+    "web-browser"
+  ],
   "cloned_from": {
     "name": "main",
     "version": "0.1.13"
@@ -159,6 +163,18 @@
                       }
                     },
                     {
+                      "id": "web",
+                      "label": "Web",
+                      "icon": "mods/web-browser/web.svg",
+                      "group": "panels",
+                      "action": {
+                        "type": "panel",
+                        "container": "panel",
+                        "stack": "panel-body",
+                        "target": "web"
+                      }
+                    },
+                    {
                       "id": "prs",
                       "label": "PRs",
                       "icon": "mods/branch-pr/icons/pull-request.svg",
@@ -291,6 +307,13 @@
                       "type": "block",
                       "content": {
                         "mod": "markdown-browser"
+                      }
+                    },
+                    {
+                      "id": "web",
+                      "type": "block",
+                      "content": {
+                        "mod": "web-browser"
                       }
                     },
                     {

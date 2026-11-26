@@ -45,7 +45,7 @@ Options:
 - `--no-keys`: leaves `keys.json` alone.
 - `--app-home DIR`: the Herdr App home. Default: `$HERDR_APP_HOME` or `~/.config/herdr-app`.
 
-For agents following Herdr's layout-sharing convention: run `scripts/install.sh` first and show the person the report. Ask before `--yes`, because it runs package managers with sudo and downloads terminal-browser's installer.
+For agents following Herdr's layout-sharing convention: run `scripts/install.sh` first and show the person the report. Get the person's yes before `--apply`, because it fetches and builds the `branch-pr` helper and adds global bindings to `keys.json`, and again before `--yes`, which implies `--apply` and also runs package managers with sudo and downloads terminal-browser's installer.
 
 ### Via `dotfiles-plugins`
 

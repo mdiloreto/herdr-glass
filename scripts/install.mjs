@@ -97,19 +97,32 @@ const listDir = (p) => {
   }
 };
 
-function atomicWrite(file, data) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, data);
-  fs.renameSync(tmp, file);
+// A failed write must not leave its temp file behind: inside a mod dir it
+// would later read as a user-added file.
+function viaTemp(dst, fill) {
+  fs.mkdirSync(path.dirname(dst), { recursive: true });
+  const tmp = `${dst}.tmp-${process.pid}`;
+  try {
+    fill(tmp);
+    fs.renameSync(tmp, dst);
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
+function atomicWrite(file, data, mode) {
+  viaTemp(file, (tmp) => {
+    fs.writeFileSync(tmp, data);
+    if (mode !== undefined) fs.chmodSync(tmp, mode);
+  });
 }
 
 function atomicCopy(src, dst) {
-  fs.mkdirSync(path.dirname(dst), { recursive: true });
-  const tmp = `${dst}.tmp-${process.pid}`;
-  fs.copyFileSync(src, tmp);
-  fs.chmodSync(tmp, fs.statSync(src).mode & 0o777);
-  fs.renameSync(tmp, dst);
+  viaTemp(dst, (tmp) => {
+    fs.copyFileSync(src, tmp);
+    fs.chmodSync(tmp, fs.statSync(src).mode & 0o777);
+  });
 }
 
 // ---- programs and versions -------------------------------------------------
@@ -178,7 +191,7 @@ function pickInstaller(spec) {
       if (i[key] && onPath(bin)) return { cmd: [...sudo, bin, ...args, i[key]] };
     }
   }
-  if (i.script) return { cmd: ["sh", "-c", 'curl -fsSL "$1" | bash', "sh", i.script], env: i.env, label: `curl -fsSL ${i.script} | bash` };
+  if (i.script) return { cmd: ["sh", "-c", 'f=$(mktemp) || exit 1; curl -fsSL "$1" -o "$f" && bash "$f"; s=$?; rm -f "$f"; exit $s', "sh", i.script], env: i.env, label: `curl -fsSL ${i.script} | bash` };
   return null;
 }
 
@@ -234,6 +247,7 @@ function snap(p, type) {
       const r = rel ? `${rel}/${e.name}` : e.name;
       if (machine(r)) continue;
       if (e.isDirectory()) walk(r);
+      else if (e.isSymbolicLink()) out[r] = `link:${fs.readlinkSync(path.join(p, r))}`;
       else out[r] = sha(path.join(p, r));
     }
   };
@@ -321,7 +335,14 @@ function syncItems(o, shipped, manifest) {
     }
     const r = syncItem(it, o, manifest.items);
     say(r.status, r.msg);
-    if (apply && r.status !== "skip") r.act?.();
+    if (apply && r.status !== "skip") {
+      try {
+        r.act?.();
+      } catch (e) {
+        say("failed", `${it.key}: ${e.message}`);
+        continue;
+      }
+    }
     if (it.section === "Mods" && r.status !== "skip") usable.add(it.name);
     if (it.section === "Mods" && (r.status === "install" || r.status === "update")) touched.add(it.name);
   }
@@ -371,7 +392,9 @@ function syncKeys(o) {
   say("install", `keys.json: ${added} binding(s) added, ${conflicts.length} conflict(s) kept`);
   if (!apply) return;
   if (had) fs.copyFileSync(file, `${file}.bak-herdr-glass-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}`);
-  atomicWrite(file, `${JSON.stringify(keys, null, 2)}\n`);
+  // Write through a symlink and keep the mode: keys.json may be managed elsewhere and private.
+  const target = realOr(file, file);
+  atomicWrite(target, `${JSON.stringify(keys, null, 2)}\n`, had ? fs.statSync(target).mode & 0o777 : undefined);
 }
 
 // ---- 5. helpers ------------------------------------------------------------
@@ -379,7 +402,9 @@ function syncKeys(o) {
 function buildHelper(h, bin, stamp) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "herdr-glass-"));
   const run = (cmd, args, cwd, env = {}) => {
-    const r = spawnSync(cmd, args, { cwd, env: { ...process.env, ...env }, encoding: "utf8" });
+    // An inherited GIT_DIR would make git act on that repo instead of the temp dir.
+    const base = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
+    const r = spawnSync(cmd, args, { cwd, env: { ...base, ...env }, encoding: "utf8" });
     if (r.status !== 0) throw new Error(`${cmd} ${args[0]} failed: ${(r.stderr || r.error?.message || "").trim()}`);
   };
   try {

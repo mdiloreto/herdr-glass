@@ -25,7 +25,7 @@ function systemTool(name) {
 // so the host's real node, pacman, sudo, go and brew never leak in.
 function makeBin(dir, withNode) {
   fs.mkdirSync(dir, { recursive: true });
-  for (const t of ["sh", "dirname", "chmod", "git"]) fs.symlinkSync(systemTool(t), path.join(dir, t));
+  for (const t of ["sh", "dirname", "chmod", "git", "mktemp", "rm", "mkdir"]) fs.symlinkSync(systemTool(t), path.join(dir, t));
   if (withNode) fs.symlinkSync(process.execPath, path.join(dir, "node"));
 }
 
@@ -90,10 +90,10 @@ function build(t) {
   return { tmp, pack, app, bin, log };
 }
 
-function run(f, args, { path: pathEnv = f.bin } = {}) {
+function run(f, args, { path: pathEnv = f.bin, env = {} } = {}) {
   const r = spawnSync(process.execPath, [path.join(f.pack, "scripts", "install.mjs"), ...args, "--app-home", f.app], {
     encoding: "utf8",
-    env: { PATH: pathEnv, HOME: f.tmp },
+    env: { PATH: pathEnv, HOME: f.tmp, ...env },
   });
   return { status: r.status, out: r.stdout, err: r.stderr };
 }
@@ -128,6 +128,12 @@ test("default check reports installs and writes nothing", (t) => {
   assert.equal(r.status, 1);
   assert.match(r.out, /install\s+mods\/alpha/);
   assert.equal(fs.existsSync(f.app), false);
+
+  const keys = '{"mine":{"a":"b"}}\n';
+  write(path.join(f.app, "keys.json"), keys);
+  run(f, []);
+  assert.equal(read(f.app, "keys.json"), keys);
+  assert.deepEqual(fs.readdirSync(f.app), ["keys.json"]);
 });
 
 test("apply installs everything; a second apply changes nothing", (t) => {
@@ -314,4 +320,102 @@ test("install.sh runs the report, and explains when node is missing", (t) => {
   });
   assert.equal(noNode.status, 1);
   assert.match(noNode.stderr, /Node\.js 22\.15\+ is required.*https:\/\/nodejs\.org/);
+});
+
+const editReq = (f, fn) => {
+  const file = path.join(f.pack, "requirements.json");
+  const req = JSON.parse(fs.readFileSync(file, "utf8"));
+  fn(req);
+  fs.writeFileSync(file, JSON.stringify(req));
+};
+
+function fakeGitAndGo(f, goBody) {
+  fs.rmSync(path.join(f.bin, "git"));
+  write(
+    path.join(f.bin, "git"),
+    `#!/bin/sh\necho "$1 GIT_DIR=\${GIT_DIR-unset}" >> "${f.log}.git"\n[ "$1" = checkout ] && mkdir -p branch-pr/helper\nexit 0\n`,
+    0o755,
+  );
+  write(path.join(f.bin, "go"), `#!/bin/sh\n${goBody}\n`, 0o755);
+}
+
+test("helper builds with a clean git env, stamps it, and cleans up on failure", (t) => {
+  const f = build(t);
+  const binDir = path.join(f.app, "mods", "branch-pr", "bin");
+  fakeGitAndGo(f, 'echo boom >&2; exit 1');
+  const bad = run(f, ["--apply"], { env: { GIT_DIR: "/nonexistent" } });
+  assert.match(bad.out, /failed\s+branch-pr: .*boom/);
+  assert.deepEqual(fs.existsSync(binDir) ? fs.readdirSync(binDir) : [], []);
+
+  fakeGitAndGo(f, `printf '#!/bin/sh\\n' > "$3"; chmod +x "$3"`);
+  const ok = run(f, ["--apply"], { env: { GIT_DIR: "/nonexistent" } });
+  assert.equal(ok.status, 0, ok.out);
+  assert.ok(fs.existsSync(path.join(binDir, "herdr-pr")));
+  assert.equal(read(binDir, ".herdr-pr.rev"), `${COMMIT}\n`);
+  const gitLog = read(`${f.log}.git`).trim().split("\n");
+  assert.ok(gitLog.length >= 3);
+  assert.ok(gitLog.every((l) => l.endsWith("GIT_DIR=unset")), gitLog.join("\n"));
+});
+
+test("keys.json symlink and mode survive the merge", (t) => {
+  const f = build(t);
+  const real = path.join(f.tmp, "real-keys.json");
+  write(real, '{"mine":{"a":"b"}}\n', 0o600);
+  fs.mkdirSync(f.app, { recursive: true });
+  fs.symlinkSync(real, path.join(f.app, "keys.json"));
+  run(f, ["--apply"]);
+  assert.equal(fs.lstatSync(path.join(f.app, "keys.json")).isSymbolicLink(), true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(real, "utf8"))["layout:glass"], { "alt-1": "pane.focus" });
+  assert.equal(fs.statSync(real).mode & 0o777, 0o600);
+});
+
+test("script installer does not run a failed download", (t) => {
+  const f = build(t);
+  editReq(f, (r) => {
+    r.programs["tool-s"] = { why: "Script tool.", required: true, install: { script: "https://example.invalid/install", env: { K: "V" } } };
+  });
+  write(path.join(f.bin, "curl"), "#!/bin/sh\nexit 22\n", 0o755);
+  write(path.join(f.bin, "bash"), `#!/bin/sh\necho "$K $@" >> "${f.log}.bash"\n`, 0o755);
+  const bad = run(f, ["--yes"]);
+  assert.match(bad.out, /failed\s+tool-s: installer exited 22/);
+  assert.equal(fs.existsSync(`${f.log}.bash`), false);
+
+  write(path.join(f.bin, "curl"), '#!/bin/sh\necho "#!/bin/sh" > "$4"\n', 0o755);
+  run(f, ["--yes"]);
+  assert.match(read(`${f.log}.bash`), /^V /);
+});
+
+test("dangling symlink inside an installed mod is reported, not a crash", (t) => {
+  const f = build(t);
+  run(f, ["--apply"]);
+  fs.symlinkSync("nowhere", path.join(f.app, "mods", "alpha", "dangling"));
+  const r = run(f, ["--check"]);
+  assert.equal(r.status, 1);
+  assert.equal(r.err, "");
+  assert.match(r.out, /skip\s+mods\/alpha: edited locally: dangling/);
+});
+
+test("one item failing to copy does not stop the rest or the manifest", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root ignores directory permissions");
+  const f = build(t);
+  write(path.join(f.pack, "mods", "alpha", "sub", "x.js"), "v1\n");
+  run(f, ["--apply"]);
+  const before = JSON.parse(read(f.app, ".herdr-glass.json"));
+  write(path.join(f.pack, "mods", "alpha", "sub", "x.js"), "v2\n");
+  write(path.join(f.pack, "mods", "insights", "main.js"), "// insights v2\n");
+  const sub = path.join(f.app, "mods", "alpha", "sub");
+  fs.chmodSync(sub, 0o555);
+  let r;
+  try {
+    r = run(f, ["--apply"]);
+  } finally {
+    fs.chmodSync(sub, 0o755);
+  }
+  assert.match(r.out, /failed\s+mods\/alpha: /);
+  assert.equal(r.status, 1);
+  assert.equal(read(f.app, "mods/insights/main.js"), "// insights v2\n");
+  assert.deepEqual(fs.readdirSync(sub), ["x.js"]);
+  const after = JSON.parse(read(f.app, ".herdr-glass.json"));
+  assert.deepEqual(after.items["mods/alpha"], before.items["mods/alpha"]);
+  assert.notDeepEqual(after.items["mods/insights"], before.items["mods/insights"]);
 });

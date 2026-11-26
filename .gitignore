@@ -1,7 +1,8 @@
 .DS_Store
-node_modules/
 jsconfig.json
-mods/branch-pr/bin/
+*.d.ts
+node_modules/
+mods/*/bin/
 mods/insights/runtime.json
 .worktrees/
 mods/**/*.d.ts

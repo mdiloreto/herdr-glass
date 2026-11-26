@@ -15,6 +15,27 @@ export const programOf = (x) => x.mod ? shared(`${x.mod}.program`) ?? null : x.p
 // What a mod pane reports of its tab in shared("<mod>.status"), as the word an agent would.
 export const modStatus = (x) => shared(`${x.mod}.status`)?.[x.tab] ?? null;
 
+const isAgyProgram = (program) => {
+  const key = program?.key?.toLowerCase();
+  const name = program?.name?.toLowerCase();
+  return key === "antigravity" || key === "agy" || name === "antigravity";
+};
+
+function sessionLabel(program, labels) {
+  if (!program?.agent || !labels) return null;
+  const keys = [
+    "agent.title",
+    "session.title",
+    ...(isAgyProgram(program) ? ["agy.title"] : []),
+    "claude.title",
+  ];
+  for (const k of keys) {
+    const val = labels[k]?.trim();
+    if (val) return val;
+  }
+  return null;
+}
+
 // Snapshot once per index build; the returned function takes a pane.
 export function namer() {
   const term = new Map(terminals().map((k) => [k.address, k]));
@@ -22,7 +43,8 @@ export function namer() {
   return (x) => {
     if (x.mod) return shared(`${x.mod}.titles`)?.[x.tab] || x.title;
     const address = x.address ?? x.terminal;
-    const session = term.get(address)?.labels?.["claude.title"]?.trim();
+    const termLabels = term.get(address)?.labels;
+    const session = sessionLabel(x.program, termLabels);
     if (session) return session;
     const tab = tabs.get(x.tab);
     // A title that only names the folder says what the space already does.

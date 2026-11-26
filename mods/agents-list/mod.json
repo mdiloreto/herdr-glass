@@ -1,0 +1,13 @@
+{
+  "place": "none",
+  "title": "Spaces",
+  "cloned_from": {
+    "name": "agents",
+    "version": "0.1.14"
+  },
+  "overlay": {
+    "kind": "dialog",
+    "width": 720,
+    "height": 560
+  }
+}

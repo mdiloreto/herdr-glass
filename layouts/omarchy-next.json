@@ -1,8 +1,8 @@
 {
   "id": "root",
   "cloned_from": {
-    "name": "omarchy-glass",
-    "version": "0.1.16"
+    "name": "main",
+    "version": "0.1.13"
   },
   "type": "row",
   "children": [
@@ -80,7 +80,7 @@
             }
           },
           "size": {
-            "px": 28
+            "px": 37
           }
         }
       ],
@@ -193,17 +193,6 @@
                         "stack": "panel-body",
                         "target": "prompts"
                       }
-                    },
-                    {
-                      "id": "insights",
-                      "label": "Insights",
-                      "icon": "mods/insights/insights.svg",
-                      "group": "tabs",
-                      "action": {
-                        "type": "mod-tab",
-                        "mod": "insights",
-                        "name": "Insights"
-                      }
                     }
                   ]
                 }
@@ -258,7 +247,7 @@
                     "width": 1,
                     "color": "accent"
                   },
-                  "radius": 12,
+                  "radius": 10,
                   "gap": 8,
                   "lone": true
                 }
@@ -343,11 +332,11 @@
         {
           "id": "usage-limits",
           "type": "block",
-          "content": {
-            "mod": "usage-limits"
-          },
           "size": {
             "px": 28
+          },
+          "content": {
+            "mod": "usage-limits"
           }
         },
         {
@@ -400,30 +389,20 @@
       "resizable": false
     }
   ],
-  "background": {
-    "gradient": [
-      "#2b3550b3",
-      "#3a2b45b3"
-    ],
-    "angle": 135
-  },
-  "colors": {
-    "accent": "#9ad0ff",
-    "background": "#0a0c148c",
-    "border": "#ffffff1f",
-    "canvas": "#00000000",
-    "chrome": "#ffffff0f",
-    "popover": "#231e30"
-  },
+  "background": "canvas",
   "terminal_padding": [
     14,
     12
   ],
-  "terminal_opacity": 0,
   "divider": {
     "width": 1,
     "color": "border"
   },
+  "titlebar": "none",
+  "traffic_lights": [
+    12,
+    16
+  ],
   "floating": [
     {
       "id": "better-alerts",
@@ -433,11 +412,5 @@
       "edge": "bottom",
       "align": "end"
     }
-  ],
-  "titlebar": "none",
-  "traffic_lights": [
-    12,
-    16
-  ],
-  "window_blur": true
+  ]
 }

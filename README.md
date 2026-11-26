@@ -193,7 +193,7 @@ Much of this pack is other people's work. [`PROVENANCE.md`](./PROVENANCE.md) rec
 | [tahadx/workspace](https://github.com/tahadx/workspace) | `agents-list`, `footer`, `hoverfocus`, `icons`, `shortcuts`, `sidebar-menu`, `terminals-list`, `worktrees`, and the `workspace` layout | MIT |
 | [quaresc/cockpit](https://github.com/quaresc/cockpit) | The `cockpit` mod and layout, which bundle Apache-2.0 and MIT code and ISC [Lucide](https://github.com/lucide-icons/lucide) icons ([notices](./LICENSES/quaresc-cockpit.THIRD_PARTY_NOTICES.md)) | MIT and bundled licenses |
 | [linziyanleo/herdr-mods](https://github.com/linziyanleo/herdr-mods) | `preview-plus` ([notices](./mods/preview-plus/THIRD_PARTY.md)) | MIT and bundled licenses |
-| [nozikov/herdr-usage-limits](https://github.com/nozikov/herdr-usage-limits) | `usage-limits` | MIT |
+| [nozikov/herdr-usage-limits](https://github.com/nozikov/herdr-usage-limits) | `usage-limits`, whose panel icons upstream credits to [Lucide](https://github.com/lucide-icons/lucide) ([notice](./LICENSES/nozikov-herdr-usage-limits.lucide.txt)) | MIT; icons ISC |
 | [mdiloreto/usage-insights](https://github.com/mdiloreto/usage-insights), a fork of [harshcurious/usage-insights](https://github.com/harshcurious/usage-insights) | `insights` | MIT |
 | [dougcunha/herdr-mods](https://github.com/dougcunha/herdr-mods) | `ci-dash`, which bundles the ISC `yaml` library ([notice](./mods/ci-dash/yaml.LICENSE)) | MIT and ISC |
 | [mrolafsson/herdr-recap](https://github.com/mrolafsson/herdr-recap) | `recap` | MIT |

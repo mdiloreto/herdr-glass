@@ -191,6 +191,10 @@ function cycleSubagent(delta) {
   const byAddr = new Map(allTerminals.map((t) => [t.address, t]));
 
   let topIdx = findInOrder(f?.terminal, order, byAddr);
+  if (topIdx < 0 && f?.tab) {
+    const tabAgent = agents().find((a) => a.tab === f.tab && order.includes(a.address));
+    if (tabAgent) topIdx = order.indexOf(tabAgent.address);
+  }
   if (topIdx < 0 && f?.agent) topIdx = findInOrder(f.agent, order, byAddr);
   const coordinator = order[topIdx];
   if (!coordinator) return;

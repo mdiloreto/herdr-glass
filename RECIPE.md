@@ -28,8 +28,8 @@ This repository packages the `glass` and `glass-insights` Herdr App layouts, the
 ### Script (recommended)
 
 ```bash
-git clone https://github.com/mdiloreto/herdr-omarchy-glass.git
-cd herdr-omarchy-glass
+git clone https://github.com/mdiloreto/herdr-glass.git
+cd herdr-glass
 scripts/install.sh                 # report only, writes nothing
 scripts/install.sh --apply         # install or update the pack
 scripts/install.sh --yes           # optional: --apply, then install missing programs

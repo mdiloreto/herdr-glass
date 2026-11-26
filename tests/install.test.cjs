@@ -434,6 +434,26 @@ test("one item failing to copy does not stop the rest or the manifest", (t) => {
   assert.notDeepEqual(after.items["mods/insights"], before.items["mods/insights"]);
 });
 
+test("an unreadable file in an installed mod fails that item, not the run", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root ignores file permissions");
+  const f = build(t);
+  write(path.join(f.pack, "mods", "alpha", "y.js"), "y\n");
+  run(f, ["--apply"]);
+  write(path.join(f.pack, "mods", "insights", "main.js"), "// insights v2\n");
+  const y = path.join(f.app, "mods", "alpha", "y.js");
+  fs.chmodSync(y, 0o000);
+  let r;
+  try {
+    r = run(f, ["--apply"]);
+  } finally {
+    fs.chmodSync(y, 0o644);
+  }
+  assert.match(r.out, /failed\s+mods\/alpha: EACCES/);
+  assert.equal(r.status, 1);
+  assert.equal(read(f.app, "mods/insights/main.js"), "// insights v2\n");
+  assert.ok(fs.existsSync(path.join(f.app, ".herdr-glass.json")));
+});
+
 test("a copy that fails partway is recorded, so the next run finishes it", (t) => {
   const f = build(t);
   // The temp name of an over-long file name exceeds the limit, so only that copy fails.

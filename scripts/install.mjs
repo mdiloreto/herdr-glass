@@ -339,7 +339,13 @@ function syncItems(o, shipped, manifest) {
       line("ok", `${it.key}: shipped by Herdr, left alone`);
       continue;
     }
-    const r = syncItem(it, o, manifest.items);
+    let r;
+    try {
+      r = syncItem(it, o, manifest.items);
+    } catch (e) {
+      say("failed", `${it.key}: ${e.message}`);
+      continue;
+    }
     say(r.status, r.msg);
     if (apply && r.status !== "skip") {
       try {

@@ -31,6 +31,12 @@ files it names ship here with a quaresc-cockpit. prefix: LICENSE is
 LICENSES/quaresc-cockpit.txt, and LICENSES/Apache-2.0.txt is
 LICENSES/quaresc-cockpit.Apache-2.0.txt.
 
+nozikov/herdr-usage-limits: the usage-limits mod is MIT
+(LICENSES/nozikov-herdr-usage-limits.txt) and its upstream README credits the
+panel's icons to Lucide (https://lucide.dev), ISC License. Lucide's license is
+copied verbatim to LICENSES/nozikov-herdr-usage-limits.lucide.txt. The icons are
+in mods/usage-limits/icons/.
+
 --------------------------------------------------------------------------
 munza/herdr-mods, Apache License 2.0 (LICENSES/Apache-2.0.txt)
 

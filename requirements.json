@@ -23,9 +23,9 @@
       "install": { "brew": "node", "pacman": "nodejs", "dnf": "nodejs", "hint": "Node.js 22.15 or newer from https://nodejs.org or a version manager such as mise" }
     },
     "python3": {
-      "why": "Prompt timeline parsing.",
+      "why": "Prompt timeline parsing; reading OpenCode's link context for Markdown clicks.",
       "required": true,
-      "mods": ["over9k-prompts"],
+      "mods": ["markdown-browser", "over9k-prompts"],
       "install": { "brew": "python", "pacman": "python", "apt": "python3", "dnf": "python3" }
     },
     "hc": {

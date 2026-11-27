@@ -162,7 +162,7 @@ Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing
 - **Themes.** The pack adds `omarchy` and `catppuccin`: `herdr-app do app.theme --name catppuccin`.
 - **Your own copy.** `herdr-app do layout.clone --name glass --as my-glass`, then edit `layouts/my-glass.json` in `~/.config/herdr-app`: colors, gradient, `window_blur`, panel buttons. To keep the layout's own keys, copy the `layout:glass` section of `keys.json` to `layout:my-glass`.
 - **Hide a block.** `herdr-app do layout.hide --id usage-limits`.
-- **Keys.** [`keys.fragment.json`](./keys.fragment.json) lists every binding the pack adds. It also hands `ctrl-n`, `ctrl-left` and `ctrl-right` to the terminal program (your own bindings win), so `ctrl-n` no longer jumps to the next agent while a terminal has focus. The GitHub keys `ctrl-space alt-o` and `alt-p` need the Herdr terminal app with its `herdr-github` plugin.
+- **Keys.** [`keys.fragment.json`](./keys.fragment.json) lists every binding the pack adds. It also hands `ctrl-n` to the terminal program, so `ctrl-n` no longer jumps to the next agent while a terminal has focus, and binds `ctrl-left` and `ctrl-right` everywhere to cycle the focused agent and its sub-agents, so terminal programs no longer get those keys. Your own bindings win. The GitHub keys `ctrl-space alt-o` and `alt-p` need the Herdr terminal app with its `herdr-github` plugin.
 
 Other layouts in the pack:
 

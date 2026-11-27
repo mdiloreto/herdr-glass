@@ -103,5 +103,13 @@
       "mods/insights": "mods/insights",
       "mods/usage-limits-fleet-canary": "mods/usage-limits-fleet-canary"
     }
+  },
+  {
+    "repo": "l4ci/herdr-mods",
+    "commit": "d59be47112ddb69d656fab441fc6892ec2091c1a",
+    "license": "Apache-2.0",
+    "paths": {
+      "mods/vitals": "vitals/mods/vitals"
+    }
   }
 ]

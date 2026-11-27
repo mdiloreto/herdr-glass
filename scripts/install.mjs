@@ -72,6 +72,14 @@ const lstat = (p) => {
     return null;
   }
 };
+const absent = (p) => {
+  try {
+    fs.lstatSync(p);
+    return false;
+  } catch (e) {
+    return e.code === "ENOENT";
+  }
+};
 const readText = (p) => {
   try {
     return fs.readFileSync(p, "utf8");
@@ -308,6 +316,8 @@ function syncItem(it, o, items) {
   };
 
   const l = lstat(T);
+  // A layout this installer put in place and the person then deleted stays deleted.
+  if (!l && it.section === "Layouts" && items[it.key] && absent(T)) return { status: "removed", msg: `${it.key}: deleted locally, left out` };
   if (!l) return { status: "install", msg: asLink ? `${it.key} (symlink)` : it.key, act: put };
   if (l.isSymbolicLink()) {
     if (realOr(T) === realOr(S)) return { status: "ok", msg: `${it.key} (linked)`, act: () => (items[it.key] = { type: "link" }) };

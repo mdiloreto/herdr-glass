@@ -17,7 +17,8 @@ const BOX_BOTTOM_RE = /^\s*[╰└][─━═]*[╯┘]\s*$/;
 const BOX_TOP_RE = /^\s*[╭┌][─━═]*[╮┐]\s*$/;
 const BOX_SIDE_RE = /^\s*[│║](.*?)[│║]?\s*$/;
 const OPENCODE_BAR_RE = /^\s*┃(.*)$/;
-const OPENCODE_COMPOSER_FOOTER_RE = /^(?:(?:build|plan|ask|agent)\s+\S|tab\s+agents?\b|ctrl\+[a-z]\b|esc\s+to\b)/i;
+const OPENCODE_COMPOSER_FOOTER_RE =
+  /^(?:(?:Build|Plan|Ask)\s{2,}[A-Za-z0-9._-]+(?:\s+[A-Za-z0-9._-]+){0,3}|(?:tab\s+agents?\b|ctrl\+[a-z]\b|esc\s+to\b).*)$/i;
 
 // Exact known composer placeholder strings (normalized lowercase) that are NOT unsent user drafts.
 const EXACT_PLACEHOLDERS = new Set([
@@ -25,16 +26,19 @@ const EXACT_PLACEHOLDERS = new Set([
   "use /skills to list available skills",
   "summarize recent commits",
   "implement {feature}",
+  "explain this codebase",
+  "find and fix a bug in @filename",
+  "write tests for @filename",
+  "improve documentation in @filename",
+  "run /review on my current changes",
   "ask anything...",
 ]);
-const CLAUDE_TRY_PLACEHOLDER_RE = /^Try\s+"[^"]+"$/i;
 const OPENCODE_ASK_PLACEHOLDER_RE = /^Ask anything\.\.\.\s+"[^"]+"$/i;
 
 export function isKnownPlaceholder(text) {
   const normalized = String(text ?? "").replace(/\s+/g, " ").trim();
   if (!normalized) return false;
   if (EXACT_PLACEHOLDERS.has(normalized.toLowerCase())) return true;
-  if (CLAUDE_TRY_PLACEHOLDER_RE.test(normalized)) return true;
   if (OPENCODE_ASK_PLACEHOLDER_RE.test(normalized)) return true;
   return false;
 }
@@ -50,6 +54,7 @@ const FOOTER_CHROME_PATTERNS = [
   /^\s*\d+%\s+(?:context|left|used)\b/i,
   /^\s*esc\s+to\s+(?:interrupt|cancel|close)/i,
   /^\s*enter\s+to\s+(?:send|submit|confirm)/i,
+  /^[✻✽✶✢]\s+\S+(?:\s+\S+){0,2}\s+for\s+\d+[smhd]/i,
 ];
 
 // Prose / conversational markers that disqualify a line from being a genuine error banner.
@@ -63,9 +68,28 @@ const PROSE_DISQUALIFIERS = [
   /^\s*(?:\/\/|#|\/\*|\*|- \[.\])/,
 ];
 
+// Conditional / explanatory prose clauses that disqualify a matched banner tail.
+const PROSE_TAIL_DISQUALIFIERS = [
+  /\bif\s+(?:the|a|an|it|this|that|you|your|they|we)\b/i,
+  /\bwhen\s+(?:the|a|an|it|this|that|you|your|they|we)\b/i,
+  /\bshould\s+(?:i|we|you)\b/i,
+  /\bis\s+(?:the|a|an|returned|thrown|triggered|raised|sent|handled|retried)\b/i,
+  /\bare\s+(?:returned|thrown|triggered|raised|sent|handled|retried)\b/i,
+  /\berrors?\s+(?:are|is|were|was|can|will|should)\b/i,
+  /\brequest\s+fails\b/i,
+  /\bunless\s+(?:the|a|it|you)\b/i,
+  /\bbecause\s+(?:the|a|it|we|you)\b/i,
+];
+
+// Preceding line indicating the following line is quoted/logged output rather than a live banner.
+const QUOTED_INTRO_RE =
+  /\b(?:log|logs|output|saw|returned|example|error\s+was|error\s+message|prints?|printed|shows?|showed|got|received|reads?|says?|said|snippet|sample|message)\s*:\s*$/i;
+
 // Valid continuation phrasing immediately following a matched banner prefix on the same line.
-const VALID_BANNER_TAIL_NO_SEP_RE = /^(?:(?:please\s+)?(?:try\s+again|retry|wait)|resets?(?:\s|$)|available\b|until\b|in\s+\d+|after\s+\d+|retry[- ]?after\b|at\s+\d)/i;
-const VALID_BANNER_TAIL_WITH_SEP_RE = /^(?:(?:please\s+)?(?:try\s+again|retry|wait)|resets?(?:\s|$)|available\b|until\b|in\s+\d+|after\s+\d+|retry[- ]?after\b|at\s+\d|your\s+(?:usage\s+)?limit\b|rate\s+limit\b|quota\b|too\s+many\s+requests\b|429\b|upgrade\b|learn\s+more\b|https?:\/\/)/i;
+const VALID_BANNER_TAIL_NO_SEP_RE =
+  /^(?:(?:please\s+)?(?:try\s+again|retry|wait)|resets?(?:\s|$)|available\b|until\b|in\s+\d+|after\s+\d+|retry[- ]?after\b|at\s+\d)/i;
+const VALID_BANNER_TAIL_WITH_SEP_RE =
+  /^(?:(?:please\s+)?(?:try\s+again|retry|wait)|resets?(?:\s|$)|available\b|until\b|in\s+\d+|after\s+\d+|retry[- ]?after\b|at\s+\d|your\s+(?:usage\s+)?limit\b|rate\s+limit\b|quota\b|too\s+many\s+requests\b|429\b|upgrade\b|learn\s+more\b|https?:\/\/|to\s+get\s+more\s+access\b|contact\s+(?:your\s+)?admin\b|provider\s+throttled\b|throttled\b)/i;
 
 // Valid continuation lines immediately below a matched banner (multi-line error boxes).
 const BANNER_CONTINUATION_RE = /^(?:(?:please\s+)?(?:try\s+again|retry(?:\s+after|\s+in|\s+at)?|wait\b)|retry[- ]?after\b|resets?\b|your\s+(?:usage\s+)?limit\b|available\s+(?:again\s+)?(?:in|at)\b|until\s+\d|upgrade\b|learn\s+more\b|https?:\/\/|error\s*[:\-–]|status\s*[:=]\s*429)/i;
@@ -165,15 +189,23 @@ function isFooterChromeLine(line) {
   return FOOTER_CHROME_PATTERNS.some((re) => re.test(line));
 }
 
-function isChromeLine(line) {
+function isChromeLine(line, rawLine = "") {
   if (!line || DIVIDER_ONLY.test(line)) return true;
   if (/^[>❯›»$%#]\s*$/.test(line)) return true;
+  const barMatch = rawLine ? OPENCODE_BAR_RE.exec(rawLine) : null;
+  if (barMatch) {
+    const rawInner = barMatch[1].trim();
+    if (!rawInner || isKnownPlaceholder(rawInner)) return true;
+    if (OPENCODE_COMPOSER_FOOTER_RE.test(rawInner)) return true;
+    return FOOTER_CHROME_PATTERNS.some((re) => re.test(line));
+  }
   const promptMatch = PROMPT_LINE_RE.exec(line);
   if (promptMatch) {
     const inner = promptMatch[1].trim();
     return !inner || isKnownPlaceholder(inner);
   }
   if (isKnownPlaceholder(line)) return true;
+  if (rawLine && OPENCODE_COMPOSER_FOOTER_RE.test(rawLine.trim())) return true;
   if (OPENCODE_COMPOSER_FOOTER_RE.test(line)) return true;
   return FOOTER_CHROME_PATTERNS.some((re) => re.test(line));
 }
@@ -231,7 +263,7 @@ export function hasUnsentDraft(screenText) {
     const interior = [];
     let j = idx - 1;
     let foundTop = false;
-    while (j >= 0 && idx - j <= 25) {
+    while (j >= 0 && idx - j <= 40) {
       if (BOX_TOP_RE.test(rawLines[j])) {
         foundTop = true;
         break;
@@ -257,13 +289,13 @@ export function hasUnsentDraft(screenText) {
   if (OPENCODE_BAR_RE.test(rawLines[idx])) {
     const barLines = [];
     let j = idx;
-    while (j >= 0 && idx - j < 25) {
+    while (j >= 0 && idx - j < 40) {
       const m = OPENCODE_BAR_RE.exec(rawLines[j]);
       if (!m) break;
       barLines.unshift(m[1].trim());
       j -= 1;
     }
-    // Peel trailing OpenCode mode/model/shortcut footer lines inside the `┃` block.
+    // Peel trailing OpenCode mode/model/shortcut footer lines inside the `┃` block (tested on uncollapsed text).
     while (barLines.length > 0) {
       const last = barLines[barLines.length - 1];
       if (!last || OPENCODE_COMPOSER_FOOTER_RE.test(last) || FOOTER_CHROME_PATTERNS.some((re) => re.test(last))) {
@@ -285,10 +317,10 @@ export function hasUnsentDraft(screenText) {
     return true;
   }
 
-  // Check if bottom lines are indented continuation lines of a prompt just above them.
+  // Check if bottom lines are indented continuation lines of a prompt just above them (up to whole visible screen).
   let k = idx;
   const contLines = [];
-  while (k >= 0 && idx - k < 5) {
+  while (k >= 0 && idx - k < 40) {
     const raw = rawLines[k];
     const cleaned = cleanLine(raw);
     const pm = PROMPT_LINE_RE.exec(cleaned);
@@ -311,21 +343,21 @@ export function hasUnsentDraft(screenText) {
  */
 export function extractBottomRegion(text, maxLines = BOTTOM_REGION_LINES) {
   const stripped = stripAnsi(text);
-  const nonEmpty = [];
+  const items = [];
   for (const rawLine of stripped.split(/\r?\n/)) {
     const line = cleanLine(rawLine);
     if (!line || DIVIDER_ONLY.test(line)) continue;
-    nonEmpty.push(line);
+    items.push({ raw: rawLine, line });
   }
   // Peel trailing prompt / footer chrome (up to MAX_CHROME_LINES) from the bottom.
-  let end = nonEmpty.length;
+  let end = items.length;
   let peeled = 0;
-  while (end > 0 && peeled < MAX_CHROME_LINES && isChromeLine(nonEmpty[end - 1])) {
+  while (end > 0 && peeled < MAX_CHROME_LINES && isChromeLine(items[end - 1].line, items[end - 1].raw)) {
     end -= 1;
     peeled += 1;
   }
   const start = Math.max(0, end - maxLines);
-  return nonEmpty.slice(start, end);
+  return items.slice(start, end).map((x) => x.line);
 }
 
 function to24Hour(hour, meridiem) {
@@ -432,9 +464,9 @@ function resolveCalendarTime({ year, month, day, hour, minute, second = 0, tzRaw
 
 /**
  * Parses a reset time or relative retry duration from rate-limit banner text.
- * Returns epoch ms or null if none found.
+ * Returns `{ resetsAtMs, isAbsoluteTimeOfDay }` or null if none found.
  */
-export function parseResetTime(text, nowMs = Date.now()) {
+function parseResetTimeInfo(text, nowMs = Date.now()) {
   const s = stripAnsi(text);
   if (!s) return null;
 
@@ -442,23 +474,23 @@ export function parseResetTime(text, nowMs = Date.now()) {
   const isoMatch = /\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2}))\b/i.exec(s);
   if (isoMatch) {
     const ms = Date.parse(isoMatch[1]);
-    if (Number.isFinite(ms)) return ms;
+    if (Number.isFinite(ms)) return { resetsAtMs: ms, isAbsoluteTimeOfDay: false };
   }
 
   // 2. Relative durations: "in 4m 30s", "in 2h 15m", "in 45 seconds", "after 30s", "retry-after: 120"
   const relContext = /\b(?:in|after|retry[- ]?after\s*[:=]?\s*)\s*((?:\d+\s*(?:days?|d|hours?|hrs?|hr|h|minutes?|mins?|min|m|seconds?|secs?|sec|s)(?:\s*(?:,|and)?\s*)?)+)\b/i.exec(s);
   if (relContext) {
     const totalMs = parseDurationMs(relContext[1]);
-    if (totalMs > 0) return nowMs + totalMs;
+    if (totalMs > 0) return { resetsAtMs: nowMs + totalMs, isAbsoluteTimeOfDay: false };
   }
   const bareRetryAfter = /\bretry[- ]?after\s*[:=]\s*(\d+)\b/i.exec(s);
   if (bareRetryAfter) {
     const secs = Number(bareRetryAfter[1]);
-    if (Number.isFinite(secs) && secs > 0) return nowMs + secs * 1000;
+    if (Number.isFinite(secs) && secs > 0) return { resetsAtMs: nowMs + secs * 1000, isAbsoluteTimeOfDay: false };
   }
 
-  // 3. Explicit date + time: "Oct 15, 3pm (UTC)", "Nov 26, 2026 7:00 PM", "Nov 26 at 19:00 UTC"
-  const monthDateRe = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?(?:\s*(?:,|at)?\s*(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?(?:\s*(am|pm))?)?(?:\s*\(([^)]+)\)|\s+((?:UTC|GMT)[+-]\d{1,2}(?::\d{2})?|UTC|GMT|[+-]\d{2}:?\d{2}))?/i;
+  // 3. Explicit date + time: "Oct 15, 3pm (UTC)", "Nov 26, 2026 7:00 PM", "Nov 26 at 19:00 GMT-0330"
+  const monthDateRe = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?(?:\s*(?:,|at)?\s*(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?(?:\s*(am|pm))?)?(?:\s*\(([^)]+)\)|\s+((?:UTC|GMT)[+-]\d{1,2}(?::?\d{2})?(?!\d)|UTC|GMT|[+-]\d{2}:?\d{2}(?!\d)))?/i;
   const dateMatch = monthDateRe.exec(s);
   if (dateMatch && dateMatch[4] != null) {
     const month = MONTHS[dateMatch[1].toLowerCase()];
@@ -469,22 +501,25 @@ export function parseResetTime(text, nowMs = Date.now()) {
     const second = dateMatch[6] ? Number(dateMatch[6]) : 0;
     const tzRaw = dateMatch[8] || dateMatch[9] || null;
     if (month !== undefined && day >= 1 && day <= 31 && hour !== null && minute <= 59 && second <= 59) {
-      return resolveCalendarTime({
-        year,
-        month,
-        day,
-        hour,
-        minute,
-        second,
-        tzRaw,
-        nowMs,
-        hasExplicitDate: true,
-      });
+      return {
+        resetsAtMs: resolveCalendarTime({
+          year,
+          month,
+          day,
+          hour,
+          minute,
+          second,
+          tzRaw,
+          nowMs,
+          hasExplicitDate: true,
+        }),
+        isAbsoluteTimeOfDay: false,
+      };
     }
   }
 
-  // 4. Time-of-day with reset/try-again context: "resets 7pm (UTC)", "resets at 7:30pm", "Try again at 19:00 UTC"
-  const timeOfDayRe = /\b(?:resets?(?:\s+at)?|try\s+again\s+at|available\s+at|until|at)\s+(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?(?:\s*(am|pm))?(?:\s*\(([^)]+)\)|\s+((?:UTC|GMT)[+-]\d{1,2}(?::\d{2})?|UTC|GMT))?/i;
+  // 4. Time-of-day with reset/try-again context: "resets 7pm (UTC)", "resets at 19:00 GMT-0330", "resets at 19:00 -0330", "Try again at 19:00 UTC"
+  const timeOfDayRe = /\b(?:resets?(?:\s+at)?|try\s+again\s+at|available\s+at|until|at)\s+(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?(?:\s*(am|pm))?(?:\s*\(([^)]+)\)|\s+((?:UTC|GMT)[+-]\d{1,2}(?::?\d{2})?(?!\d)|UTC|GMT|[+-]\d{2}:?\d{2}(?!\d)))?/i;
   const todMatch = timeOfDayRe.exec(s);
   if (todMatch) {
     // Require either ":MM" or "am/pm" so plain numbers like "at 429" are not parsed as times.
@@ -494,22 +529,34 @@ export function parseResetTime(text, nowMs = Date.now()) {
       const second = todMatch[3] ? Number(todMatch[3]) : 0;
       const tzRaw = todMatch[5] || todMatch[6] || null;
       if (hour !== null && minute <= 59 && second <= 59) {
-        return resolveCalendarTime({
-          year: null,
-          month: null,
-          day: null,
-          hour,
-          minute,
-          second,
-          tzRaw,
-          nowMs,
-          hasExplicitDate: false,
-        });
+        return {
+          resetsAtMs: resolveCalendarTime({
+            year: null,
+            month: null,
+            day: null,
+            hour,
+            minute,
+            second,
+            tzRaw,
+            nowMs,
+            hasExplicitDate: false,
+          }),
+          isAbsoluteTimeOfDay: true,
+        };
       }
     }
   }
 
   return null;
+}
+
+/**
+ * Parses a reset time or relative retry duration from rate-limit banner text.
+ * Returns epoch ms or null if none found.
+ */
+export function parseResetTime(text, nowMs = Date.now()) {
+  const info = parseResetTimeInfo(text, nowMs);
+  return info ? info.resetsAtMs : null;
 }
 
 export function parseDurationMs(expr) {
@@ -548,9 +595,24 @@ function hasValidBannerTail(restRaw) {
     if (!rest) return true;
   }
 
-  return hadSeparator
-    ? VALID_BANNER_TAIL_WITH_SEP_RE.test(rest)
-    : VALID_BANNER_TAIL_NO_SEP_RE.test(rest);
+  // Reject conditional / explanatory prose anywhere in the tail.
+  if (PROSE_TAIL_DISQUALIFIERS.some((re) => re.test(rest))) {
+    return false;
+  }
+
+  // Validate every sentence/clause in the tail (not just the opening prefix).
+  const clauses = rest
+    .split(/[.!;·•]+\s+/)
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (clauses.length === 0) return true;
+
+  for (let i = 0; i < clauses.length; i++) {
+    const clause = clauses[i];
+    const re = i === 0 && !hadSeparator ? VALID_BANNER_TAIL_NO_SEP_RE : VALID_BANNER_TAIL_WITH_SEP_RE;
+    if (!re.test(clause)) return false;
+  }
+  return true;
 }
 
 function matchPatterns(agent, line) {
@@ -603,19 +665,33 @@ export function detectScreenRateLimit({ agent, address = "", text, reportMsg = n
     const line = region[i];
     const match = matchPatterns(agent, line);
     if (!match) continue;
+    // Reject quoted/logged output when immediately preceded by an introductory line (e.g. "Here is the log I saw:").
+    if (i > 0 && QUOTED_INTRO_RE.test(region[i - 1])) {
+      break;
+    }
     // If conversation turns or unrelated prose appear below the banner, it is not an active banner.
     if (isBannerSuperseded(region, i, agent, nowMs)) {
       break;
     }
-    // Also inspect the matched line plus immediate neighbor lines (multi-line error boxes)
-    // for a reset timestamp, e.g. line 1: "You've hit your usage limit", line 2: "Try again at 7:00 PM".
-    const snippet = region.slice(Math.max(0, i - 1), Math.min(region.length, i + 3)).join(" ");
-    const resetsAtMs = parseResetTime(snippet, nowMs);
+    // Inspect ONLY the matched line plus valid continuation lines BELOW it (never lines above `i`!).
+    const snippetLines = [line];
+    for (let k = i + 1; k < Math.min(region.length, i + 3); k++) {
+      if (BANNER_CONTINUATION_RE.test(region[k]) || parseResetTime(region[k], nowMs) !== null) {
+        snippetLines.push(region[k]);
+      } else {
+        break;
+      }
+    }
+    const snippet = snippetLines.join(" ");
+    const resetInfo = parseResetTimeInfo(snippet, nowMs);
+    const resetsAtMs = resetInfo ? resetInfo.resetsAtMs : null;
+    const isAbsoluteTimeOfDay = Boolean(resetInfo?.isAbsoluteTimeOfDay);
     const normalized = normalizeBannerLine(line);
-    const normalizedSnippet = normalizeBannerLine(region.slice(i, Math.min(region.length, i + 3)).join(" "));
+    const normalizedSnippet = normalizeBannerLine(snippet);
     return {
       reason: match.reason,
       resetsAtMs,
+      isAbsoluteTimeOfDay,
       matchedLine: line,
       normalizedSnippet,
       // Terminal-scoped and timestamp-independent so stale banners never mint new fingerprints.
@@ -628,11 +704,14 @@ export function detectScreenRateLimit({ agent, address = "", text, reportMsg = n
     const cleanMsg = cleanLine(stripAnsi(reportMsg));
     const match = matchPatterns(agent, cleanMsg);
     if (match) {
-      const resetsAtMs = parseResetTime(cleanMsg, nowMs);
+      const resetInfo = parseResetTimeInfo(cleanMsg, nowMs);
+      const resetsAtMs = resetInfo ? resetInfo.resetsAtMs : null;
+      const isAbsoluteTimeOfDay = Boolean(resetInfo?.isAbsoluteTimeOfDay);
       const normalized = normalizeBannerLine(cleanMsg);
       return {
         reason: match.reason,
         resetsAtMs,
+        isAbsoluteTimeOfDay,
         matchedLine: cleanMsg,
         normalizedSnippet: normalized,
         fingerprint: `report:${scope}:${agent}:${match.key}:${stableHash(normalized)}`,

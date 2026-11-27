@@ -1041,27 +1041,95 @@ test("hardening A1/F1/F12: stale banner never loops, terminal-scoped, and allows
     assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
   }
 
-  // Case 2: Un-superseded stale banner left on screen across turns within 2h -> at most 1 send total.
+  // Case 2: Un-superseded stale banner left on screen across turns within 10m cooldown -> at most 1 send total.
   {
     let currentTurn = 10;
     const h = createHarness({
       nowMs: T0,
-      terminals: [codexTerm({ turn: currentTurn })],
+      terminals: [codexTerm({ turn: currentTurn, status_ms: 1000 })],
       hcHandler: async (args) => {
-        if (args[0] === "read") return { code: 0, stdout: "Error: usage_limit_reached. Try again in 4m.\n› ", stderr: "" };
-        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm({ turn: currentTurn })), stderr: "" };
+        if (args[0] === "read") return { code: 0, stdout: "Error: usage_limit_reached. Try again in 2m.\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm({ turn: currentTurn, status_ms: 1000 })), stderr: "" };
         return { code: 0, stdout: "", stderr: "" };
       },
     });
     const eng = engine.createEngine(h.env);
-    for (let i = 0; i < 5; i++) {
-      await eng.tick();
-      h.advance(5 * MIN + 1000);
-      await eng.tick();
+    await eng.tick();
+    h.advance(3 * MIN + 1000);
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
+
+    // Rapid turn bumps within 10m cooldown must NOT re-queue or re-send.
+    for (let i = 0; i < 4; i++) {
       currentTurn = 11 + i;
-      h.setTerminals([codexTerm({ turn: currentTurn })]);
+      h.setTerminals([codexTerm({ turn: currentTurn, status_ms: 1000 + i + 1 })]);
+      h.advance(2 * MIN);
+      await eng.tick();
     }
     assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
+  }
+
+  // Case 2b (#9): Overnight dateless Claude banner ("resets 4pm (UTC)") with only turn 10->11 must NOT roll forward next day.
+  {
+    const claudeScreenTerm = (overrides = {}) =>
+      makeTerminal({
+        address: "t1",
+        labels: {},
+        ...overrides,
+      });
+    let currentTurn = 10;
+    const h = createHarness({
+      nowMs: Date.parse("2026-11-26T10:00:00Z"),
+      terminals: [claudeScreenTerm({ turn: currentTurn, status_ms: 1000 })],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "You've hit your limit · resets 4pm (UTC)\n\n❯ \n", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(claudeScreenTerm({ turn: currentTurn, status_ms: 1000 })), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    h.setNow(Date.parse("2026-11-26T16:02:00Z"));
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
+
+    // Next day with only turn incremented by 1 (10 -> 11) -> suppressed (0 extra sends)!
+    h.setNow(Date.parse("2026-11-27T10:00:00Z"));
+    currentTurn = 11;
+    h.setTerminals([claudeScreenTerm({ turn: currentTurn, status_ms: 1000 })]);
+    await eng.tick();
+    h.setNow(Date.parse("2026-11-27T16:02:00Z"));
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1, "overnight stale 4pm banner must not re-fire");
+  }
+
+  // Case 2c (#9): Upgrade migration — legacy screen fingerprint in handledFingerprints suppresses same-turn replay.
+  {
+    const { screen, protocol } = await loadCore();
+    const banner = "Error: usage_limit_reached. Try again in 4m.\n› ";
+    const det = screen.detectScreenRateLimit({ agent: "codex", address: "t1", text: banner, nowMs: T0 });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm({ turn: 10 })],
+      sharedInit: {
+        [protocol.STATE_KEY]: {
+          version: 1,
+          enabled: true,
+          handledFingerprints: [det.fingerprint],
+        },
+      },
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: banner, stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm({ turn: 10 })), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 0, "legacy handledFingerprint must suppress same-turn replay");
+    h.advance(6 * MIN);
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
   }
 
   // Case 3 (F12): Same banner on second terminal t2 is still queued after t1 resumed.
@@ -1086,7 +1154,7 @@ test("hardening A1/F1/F12: stale banner never loops, terminal-scoped, and allows
     assert.equal(eng.getState().queue.some((q) => q.address === "t2"), true);
   }
 
-  // Case 4 (#10): Second episode with identical banner text resumes on a new turn after >=2h.
+  // Case 4 (#14): Second episode within 2h (18m and 30m later) on new turn & updated status_ms resumes cleanly!
   {
     const ocTerm = (overrides = {}) =>
       makeTerminal({
@@ -1099,12 +1167,14 @@ test("hardening A1/F1/F12: stale banner never loops, terminal-scoped, and allows
         ...overrides,
       });
     let currentTurn = 10;
+    let currentStatusMs = 1;
+    let screenText = "Rate limit exceeded. Try again in 10m.\n\n┃  Ask anything...\n";
     const h = createHarness({
       nowMs: T0,
-      terminals: [ocTerm({ turn: currentTurn })],
+      terminals: [ocTerm({ turn: currentTurn, status_ms: currentStatusMs })],
       hcHandler: async (args) => {
-        if (args[0] === "read") return { code: 0, stdout: "Rate limit exceeded. Try again in 10m.\n", stderr: "" };
-        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(ocTerm({ turn: currentTurn })), stderr: "" };
+        if (args[0] === "read") return { code: 0, stdout: screenText, stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(ocTerm({ turn: currentTurn, status_ms: currentStatusMs })), stderr: "" };
         return { code: 0, stdout: "", stderr: "" };
       },
     });
@@ -1114,15 +1184,52 @@ test("hardening A1/F1/F12: stale banner never loops, terminal-scoped, and allows
     await eng.tick();
     assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
 
-    // 30h later on turn 40 with identical banner text -> MUST resume a second time!
-    h.setNow(T0 + 30 * HOUR);
-    currentTurn = 40;
-    h.setTerminals([ocTerm({ turn: currentTurn })]);
+    // 18m later on turn 30 with updated status_ms after work resumed and hit limit again -> MUST resume a 2nd time!
+    screenText = "Working...\n";
+    currentTurn = 20;
+    currentStatusMs = 3;
+    h.setNow(T0 + 20 * MIN);
+    h.setTerminals([ocTerm({ turn: currentTurn, status_ms: currentStatusMs })]);
     await eng.tick();
-    assert.equal(eng.getState().queue.length, 1);
+
+    screenText = "Rate limit exceeded. Try again in 10m.\n\n┃  Ask anything...\n";
+    h.setNow(T0 + 30 * MIN);
+    currentTurn = 30;
+    currentStatusMs = 5;
+    h.setTerminals([ocTerm({ turn: currentTurn, status_ms: currentStatusMs })]);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1, "second episode 18m later on new turn must queue");
     h.advance(12 * MIN);
     await eng.tick();
     assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 2);
+
+    // Real second Codex hit on turn 11 at +30m with updated status_ms -> ALSO resumes!
+    let cTurn = 10;
+    let cStatusMs = 1;
+    const h2 = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm({ turn: cTurn, status_ms: cStatusMs })],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "You've hit your usage limit. Try again in 10m.\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm({ turn: cTurn, status_ms: cStatusMs })), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng2 = engine.createEngine(h2.env);
+    await eng2.tick();
+    h2.advance(12 * MIN);
+    await eng2.tick();
+    assert.equal(h2.hcCalls.filter((a) => a[0] === "send").length, 1);
+
+    h2.setNow(T0 + 30 * MIN);
+    cTurn = 11;
+    cStatusMs = 2000;
+    h2.setTerminals([codexTerm({ turn: cTurn, status_ms: cStatusMs })]);
+    await eng2.tick();
+    assert.equal(eng2.getState().queue.length, 1, "second Codex hit on turn 11 at +30m with updated status_ms must queue");
+    h2.advance(12 * MIN);
+    await eng2.tick();
+    assert.equal(h2.hcCalls.filter((a) => a[0] === "send").length, 2);
   }
 
   // Case 5 (#10): Claude screen "resets 3pm (UTC)" resumes Day 1 AND Day 2 on a new turn.
@@ -1207,23 +1314,13 @@ test("hardening A2/F2 (#5): no promotion on 99% or mismatched low window; requir
     assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
   }
 
-  // 2. Mismatched window (20% with resetsAt +4h when transcript says +3h) NEVER promotes early; sends at +3h!
+  // 2. (#5) Observe 100% on matching +3h window at +10m, then 20% on DIFFERENT +4h window at +20m
+  //    AND stale 20% on +3h at +5m -> NEITHER promotes early; sends at real +3h reset!
   {
     const reset = T0 + 3 * HOUR;
     const h = createHarness({
       nowMs: T0,
       terminals: [makeTerminal({ turn: 10 })],
-      sharedInit: {
-        [protocol.USAGE_LIMITS_STATE_KEY]: {
-          claude: {
-            report: {
-              status: "ok",
-              observedAt: T0 / 1000,
-              windows: [{ id: "session", short: "5h", percent: 20, resetsAt: (T0 + 4 * HOUR) / 1000 }],
-            },
-          },
-        },
-      },
       execHandler: async () => ({
         code: 0,
         stdout: JSON.stringify({
@@ -1242,30 +1339,91 @@ test("hardening A2/F2 (#5): no promotion on 99% or mismatched low window; requir
     });
     const eng = engine.createEngine(h.env);
     await eng.tick();
-    h.setNow(T0 + 20 * MIN);
-    h.sharedStore[protocol.USAGE_LIMITS_STATE_KEY].claude.report.observedAt = (T0 + 20 * MIN) / 1000;
-    await eng.tick();
-    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, "must NOT promote without prior exhaustion");
+    assert.equal(eng.getState().queue.length, 1);
 
+    // Step 2a: Observe 100% on the matching +3h window at +10m -> sets sawExhausted & exhaustedObservedAtMs
+    h.setNow(T0 + 10 * MIN);
+    h.sharedStore[protocol.USAGE_LIMITS_STATE_KEY] = {
+      claude: {
+        report: {
+          status: "ok",
+          observedAt: (T0 + 10 * MIN) / 1000,
+          windows: [{ id: "session", short: "5h", percent: 100, resetsAt: reset / 1000 }],
+        },
+      },
+    };
+    await eng.tick();
+    assert.equal(eng.getState().queue[0].sawExhausted, true);
+    assert.equal(eng.getState().queue[0].exhaustedObservedAtMs, T0 + 10 * MIN);
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+
+    // Step 2b: Observe 20% on DIFFERENT window (+4h) at +20m -> MUST NOT promote!
+    h.setNow(T0 + 20 * MIN);
+    h.sharedStore[protocol.USAGE_LIMITS_STATE_KEY] = {
+      claude: {
+        report: {
+          status: "ok",
+          observedAt: (T0 + 20 * MIN) / 1000,
+          windows: [{ id: "session", short: "5h", percent: 20, resetsAt: (T0 + 4 * HOUR) / 1000 }],
+        },
+      },
+    };
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, "mismatched +4h window must NOT promote +3h entry");
+
+    // Step 2c: Stale observation (observedAt +5m < exhaustedObservedAtMs +10m) on +3h at 20% -> MUST NOT promote!
+    h.setNow(T0 + 25 * MIN);
+    h.sharedStore[protocol.USAGE_LIMITS_STATE_KEY] = {
+      claude: {
+        report: {
+          status: "ok",
+          observedAt: (T0 + 5 * MIN) / 1000,
+          windows: [{ id: "session", short: "5h", percent: 20, resetsAt: reset / 1000 }],
+        },
+      },
+    };
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, "stale observation older than exhaustedObservedAtMs must NOT promote");
+
+    // Step 2d: At the real +3h reset, it fires normally!
     h.setNow(reset + 2 * MIN);
     await eng.tick();
     assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1, "must send normally at real reset");
   }
 
-  // 3. Genuine recovery after observed 100% on matching window promotes ONCE; second promotion on same episode is capped!
+  // 3. (#5) Promotion cap driven end-to-end through engine.tick() (no manual promotedEpisodes injection)!
   {
     const reset = T0 + 3 * HOUR;
-    const entry = {
-      address: "t1",
-      machine: null,
-      provider: "claude",
-      reason: "five_hour rate limit",
-      detectedAtMs: T0,
-      resetsAtMs: reset,
-      status: "waiting",
-      sawExhausted: false,
-    };
-    const exhaustedUsage = {
+    let failGet = true;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal({ turn: 10 })],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: UUID_ERR,
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: reset / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") {
+          if (failGet) return { code: 1, stdout: "", stderr: "transient" };
+          return { code: 0, stdout: JSON.stringify(makeFreshGet({ turn: 10 })), stderr: "" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+
+    // Observe 100% at +5m
+    h.setNow(T0 + 5 * MIN);
+    h.sharedStore[protocol.USAGE_LIMITS_STATE_KEY] = {
       claude: {
         report: {
           status: "ok",
@@ -1274,11 +1432,12 @@ test("hardening A2/F2 (#5): no promotion on 99% or mismatched low window; requir
         },
       },
     };
-    const obs = engine.evaluateQuotaForEntry(entry, exhaustedUsage, T0 + 5 * MIN, 60, []);
-    assert.deepEqual(obs, { action: "observe-exhausted" });
-    entry.sawExhausted = true;
+    await eng.tick();
+    assert.equal(eng.getState().queue[0].sawExhausted, true);
 
-    const recoveredUsage = {
+    // First promotion through engine.tick() at +15m (hc get fails transiently so we can trigger drop & re-queue)
+    h.setNow(T0 + 15 * MIN);
+    h.sharedStore[protocol.USAGE_LIMITS_STATE_KEY] = {
       claude: {
         report: {
           status: "ok",
@@ -1287,13 +1446,46 @@ test("hardening A2/F2 (#5): no promotion on 99% or mismatched low window; requir
         },
       },
     };
-    const promo1 = engine.evaluateQuotaForEntry(entry, recoveredUsage, T0 + 15 * MIN, 60, []);
-    assert.equal(promo1?.action, "promote");
-    assert.ok(promo1?.promoKey);
+    await eng.tick();
+    assert.equal(eng.getState().promotedEpisodes.length, 1, "first promotion must be persisted by engine");
 
-    // Second attempt for the same (address, resetsAtMs) episode is blocked by promotedEpisodes cap!
-    const promo2 = engine.evaluateQuotaForEntry(entry, recoveredUsage, T0 + 20 * MIN, 60, [promo1.promoKey]);
-    assert.equal(promo2, null, "early promotion must be capped to 1 per episode");
+    // Exhaust transient get failures so entry is dropped with remember: false, then re-queued on next tick
+    for (let i = 1; i < engine.MAX_GET_FAILURES; i++) {
+      h.advance(35_000);
+      await eng.tick();
+    }
+    assert.equal(eng.getState().queue.length, 0);
+
+    // Recover hc get; terminal re-queues for the SAME (address, resetsAtMs) episode
+    failGet = false;
+    h.advance(15_000);
+    h.sharedStore[protocol.USAGE_LIMITS_STATE_KEY] = {
+      claude: {
+        report: {
+          status: "ok",
+          observedAt: Math.floor(h.env.now() / 1000),
+          windows: [{ id: "session", short: "5h", percent: 100, resetsAt: reset / 1000 }],
+        },
+      },
+    };
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+    assert.equal(eng.getState().queue[0].sawExhausted, true);
+
+    // Drop to 20% again on the same episode -> MUST NOT promote a second time (persisted promotedEpisodes cap)!
+    h.advance(10 * MIN);
+    h.sharedStore[protocol.USAGE_LIMITS_STATE_KEY] = {
+      claude: {
+        report: {
+          status: "ok",
+          observedAt: Math.floor(h.env.now() / 1000),
+          windows: [{ id: "session", short: "5h", percent: 20, resetsAt: reset / 1000 }],
+        },
+      },
+    };
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, "second early promotion for same episode must be capped");
+    assert.equal(eng.getState().queue[0].earlyPromoted, false);
   }
 });
 
@@ -1522,37 +1714,107 @@ test("hardening A5/F5 (#1): detects verb-first, boxed multi-line, and OpenCode d
   const T0 = Date.parse("2026-11-26T15:00:00Z");
   const MIN = 60_000;
 
-  // Real drafts MUST return true (including verb-first, boxed multi-line, OpenCode ┃)
+  // Real drafts MUST return true (including verb-first, Claude Try "...", OpenCode single-spaced Build, 6+ indented lines, boxed multi-line)
   assert.equal(screen.hasUnsentDraft("Error: usage_limit_reached. Try again in 4m.\n› please also drop the old tab"), true);
   assert.equal(screen.hasUnsentDraft("Error: usage_limit_reached. Try again in 1m.\n› Fix the production database"), true);
   assert.equal(screen.hasUnsentDraft("Error: usage_limit_reached. Try again in 1m.\n› Write a migration."), true);
+  assert.equal(screen.hasUnsentDraft('You\'ve hit your limit\n❯ Try "delete the old database"\n? for shortcuts'), true);
+  assert.equal(screen.hasUnsentDraft('You\'ve hit your limit\n❯ Try "refactor utils.ts"\n? for shortcuts'), true);
   assert.equal(screen.hasUnsentDraft("banner\n> Fix the failing test in foo.ts\n"), true);
   assert.equal(screen.hasUnsentDraft("banner\n╭────╮\n│ > half │\n╰────╯\n  ? for shortcuts"), true);
   assert.equal(screen.hasUnsentDraft("banner\n╭────╮\n│ > line1 │\n│   line2 │\n╰────╯\n  ? for shortcuts"), true);
   assert.equal(screen.hasUnsentDraft("banner\n╭────╮\n│ >  │\n│   line2 │\n╰────╯\n  ? for shortcuts"), true);
   assert.equal(screen.hasUnsentDraft("banner\n┃  my half typed text\n┃  Build  Claude"), true);
+  assert.equal(screen.hasUnsentDraft("banner\n┃  Build the production migration\n┃  Build  Claude"), true);
   assert.equal(screen.hasUnsentDraft("Rate limit exceeded. Try again in 10m.\n\n┃  please also drop the old tab\n"), true);
+  // 6+ indented continuation lines below Claude prompt MUST be caught as draft (#1)
+  assert.equal(
+    screen.hasUnsentDraft(
+      [
+        "You've hit your limit",
+        "❯ first line",
+        "  cont 1",
+        "  cont 2",
+        "  cont 3",
+        "  cont 4",
+        "  cont 5",
+        "  cont 6",
+        "  cont 7",
+        "? for shortcuts",
+      ].join("\n"),
+    ),
+    true,
+  );
 
-  // Empty prompts & exact known placeholders MUST return false
+  // Empty prompts & exact known placeholders MUST return false (#12: all real Codex placeholders)
   assert.equal(screen.hasUnsentDraft("Error: usage_limit_reached. Try again in 4m.\n› "), false);
-  assert.equal(screen.hasUnsentDraft('You\'ve hit your limit\n❯ Try "refactor utils.ts"\n? for shortcuts'), false);
   assert.equal(screen.hasUnsentDraft("banner\n› Ask Codex to do anything"), false);
   assert.equal(screen.hasUnsentDraft("banner\n› Use /skills to list available skills"), false);
   assert.equal(screen.hasUnsentDraft("banner\n› Summarize recent commits"), false);
   assert.equal(screen.hasUnsentDraft("banner\n› Implement {feature}\n  100% context left"), false);
+  assert.equal(screen.hasUnsentDraft("banner\n› Explain this codebase"), false);
+  assert.equal(screen.hasUnsentDraft("banner\n› Find and fix a bug in @filename"), false);
+  assert.equal(screen.hasUnsentDraft("banner\n› Write tests for @filename"), false);
+  assert.equal(screen.hasUnsentDraft("banner\n› Improve documentation in @filename"), false);
+  assert.equal(screen.hasUnsentDraft("banner\n› Run /review on my current changes"), false);
   assert.equal(screen.hasUnsentDraft("banner\n┃  Ask anything...\n┃  Build  Claude"), false);
   assert.equal(screen.hasUnsentDraft('banner\n┃  Ask anything... "Fix broken tests"\n┃  Build  Claude'), false);
   assert.equal(screen.hasUnsentDraft("banner\n┃  \n┃  Build  Claude"), false);
   assert.equal(screen.hasUnsentDraft("banner\n╭────╮\n│ >  │\n╰────╯\n  ? for shortcuts"), false);
 
-  // End-to-end: queued while prompt empty, then user types verb-first draft before deadline -> skipped-replied, 0 sends!
-  for (const draftScreen of [
-    "Error: usage_limit_reached. Try again in 1m.\n› Fix the production database",
-    "Error: usage_limit_reached. Try again in 1m.\n› Write a migration.",
-    "Error: usage_limit_reached. Try again in 1m.\n╭────╮\n│ > line1 │\n│   line2 │\n╰────╯\n  ? for shortcuts",
-    "Error: usage_limit_reached. Try again in 1m.\n┃  my half typed text\n┃  Build  Claude",
+  // End-to-end: queued while prompt empty, then user types draft on the MATCHING agent terminal -> skipped-replied, 0 sends!
+  const agentDraftCases = [
+    { agent: "codex", initial: "Error: usage_limit_reached. Try again in 1m.\n› ", draft: "Error: usage_limit_reached. Try again in 1m.\n› Fix the production database" },
+    { agent: "codex", initial: "Error: usage_limit_reached. Try again in 1m.\n› ", draft: "Error: usage_limit_reached. Try again in 1m.\n› Write a migration." },
+    { agent: "claude", initial: "You've hit your limit · resets in 1m.\n❯ ", draft: 'You\'ve hit your limit · resets in 1m.\n❯ Try "delete the old database"\n? for shortcuts' },
+    {
+      agent: "claude",
+      initial: "You've hit your limit · resets in 1m.\n❯ ",
+      draft: "You've hit your limit · resets in 1m.\n❯ draft line\n  c1\n  c2\n  c3\n  c4\n  c5\n  c6\n? for shortcuts",
+    },
+    { agent: "claude", initial: "You've hit your limit · resets in 1m.\n❯ ", draft: "You've hit your limit · resets in 1m.\n╭────╮\n│ > line1 │\n│   line2 │\n╰────╯\n  ? for shortcuts" },
+    { agent: "opencode", initial: "Rate limit exceeded. Try again in 1m.\n┃  \n┃  Build  Claude", draft: "Rate limit exceeded. Try again in 1m.\n┃  my half typed text\n┃  Build  Claude" },
+    { agent: "opencode", initial: "Rate limit exceeded. Try again in 1m.\n┃  \n┃  Build  Claude", draft: "Rate limit exceeded. Try again in 1m.\n┃  Build the production migration\n┃  Build  Claude" },
+  ];
+  for (const tc of agentDraftCases) {
+    let screenText = tc.initial;
+    const term = makeTerminal({
+      address: "t1",
+      program: { key: tc.agent, name: tc.agent, agent: true, shell: false },
+      foreground: { pid: 200, name: tc.agent },
+      report: { app: tc.agent, state: "idle" },
+      labels: {},
+      argv: [tc.agent],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [term],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: screenText, stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(term), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1, `should queue initial ${tc.agent}`);
+
+    screenText = tc.draft;
+    h.advance(3 * MIN);
+    const st = await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, `must not send into ${tc.agent} draft`);
+    assert.equal(st.history[0].outcome, "skipped-replied");
+    assert.match(st.history[0].detail, /draft/i);
+  }
+
+  // End-to-end (#12): All 5 previously-unlisted Codex placeholders queue and resume cleanly!
+  for (const ph of [
+    "Explain this codebase",
+    "Find and fix a bug in @filename",
+    "Write tests for @filename",
+    "Improve documentation in @filename",
+    "Run /review on my current changes",
   ]) {
-    let screenText = "Error: usage_limit_reached. Try again in 1m.\n› ";
     const codexTerm = makeTerminal({
       address: "t1",
       program: { key: "codex", name: "Codex", agent: true, shell: false },
@@ -1565,21 +1827,18 @@ test("hardening A5/F5 (#1): detects verb-first, boxed multi-line, and OpenCode d
       nowMs: T0,
       terminals: [codexTerm],
       hcHandler: async (args) => {
-        if (args[0] === "read") return { code: 0, stdout: screenText, stderr: "" };
+        if (args[0] === "read") return { code: 0, stdout: `You've hit your usage limit. Try again in 10m.\n\n› ${ph}\n`, stderr: "" };
         if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
         return { code: 0, stdout: "", stderr: "" };
       },
     });
     const eng = engine.createEngine(h.env);
     await eng.tick();
-    assert.equal(eng.getState().queue.length, 1);
-
-    screenText = draftScreen;
-    h.advance(3 * MIN);
+    assert.equal(eng.getState().queue.length, 1, `Codex placeholder must queue: ${ph}`);
+    h.advance(12 * MIN);
     const st = await eng.tick();
-    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
-    assert.equal(st.history[0].outcome, "skipped-replied");
-    assert.match(st.history[0].detail, /draft/i);
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1, `Codex placeholder must resume: ${ph}`);
+    assert.equal(st.history[0].outcome, "resumed");
   }
 });
 
@@ -1630,13 +1889,17 @@ test("hardening A6/F6/F10 (#4, #6, #12): replaced banner defers, atomic --if idl
     assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
   }
 
-  // #6: `done` and `error` terminals are queued, defer without burning attempts until `idle`, then send with `--if idle`!
-  {
-    let liveStatus = "done";
+  // #13: `idle` uses `--if idle`; permanent `done` and `error` fire after immediate `finalGet` (never passing `--force`);
+  //      `working` and `blocked` are skipped!
+  for (const [status, expectedArgs] of [
+    ["idle", ["send", "--if", "idle", "t1", protocol.DEFAULT_PROMPT]],
+    ["done", ["send", "t1", protocol.DEFAULT_PROMPT]],
+    ["error", ["send", "t1", protocol.DEFAULT_PROMPT]],
+  ]) {
     let statusPublishedBeforeSend = null;
     const h = createHarness({
       nowMs: T0,
-      terminals: [makeTerminal({ status: "done", report: { app: "claude-code", state: "done" } })],
+      terminals: [makeTerminal({ status, report: { app: "claude-code", state: status } })],
       execHandler: async () => ({
         code: 0,
         stdout: JSON.stringify({
@@ -1650,7 +1913,7 @@ test("hardening A6/F6/F10 (#4, #6, #12): replaced banner defers, atomic --if idl
       }),
       hcHandler: async (args) => {
         if (args[0] === "get") {
-          return { code: 0, stdout: JSON.stringify(makeFreshGet({ status: { app: "claude-code", state: liveStatus } })), stderr: "" };
+          return { code: 0, stdout: JSON.stringify(makeFreshGet({ status: { app: "claude-code", state: status } })), stderr: "" };
         }
         if (args[0] === "send") {
           statusPublishedBeforeSend = h.sharedStore[protocol.STATE_KEY]?.queue?.[0]?.status ?? null;
@@ -1661,31 +1924,15 @@ test("hardening A6/F6/F10 (#4, #6, #12): replaced banner defers, atomic --if idl
     });
     const eng = engine.createEngine(h.env);
     await eng.tick();
-    assert.equal(eng.getState().queue.length, 1, "done terminal is still queued for visibility");
+    assert.equal(eng.getState().queue.length, 1, `${status} terminal must queue`);
 
-    // Due while still `done` -> defers without sending unconditionally or burning attempts!
     h.setNow(reset + MIN);
-    let st = await eng.tick();
-    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
-    assert.equal(st.queue.length, 1);
-    assert.equal(st.queue[0].attempts, 0);
-
-    // Due while `error` -> also defers!
-    liveStatus = "error";
-    h.advance(35_000);
-    st = await eng.tick();
-    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
-    assert.equal(st.queue.length, 1);
-    assert.equal(st.queue[0].attempts, 0);
-
-    // Once terminal reports `idle` -> fires atomically with `--if idle`!
-    liveStatus = "idle";
-    h.advance(35_000);
-    st = await eng.tick();
-    assert.equal(statusPublishedBeforeSend, "resuming");
-    assert.equal(st.history[0].outcome, "resumed");
+    const st = await eng.tick();
+    assert.equal(statusPublishedBeforeSend, "resuming", `${status}: must publish resuming before send`);
+    assert.equal(st.history[0].outcome, "resumed", `${status}: must resume`);
     const sendCall = h.hcCalls.find((a) => a[0] === "send");
-    assert.deepEqual(sendCall, ["send", "--if", "idle", "t1", protocol.DEFAULT_PROMPT]);
+    assert.deepEqual(sendCall, expectedArgs, `${status}: exact send args`);
+    assert.equal(sendCall.includes("--force"), false, `${status}: must never pass --force`);
   }
 
   // #6: `status_mismatch` from `hc send --if idle` records `skipped-busy` (not `failed`, no error notification)
@@ -1757,26 +2004,29 @@ test("hardening A6/F6/F10 (#4, #6, #12): replaced banner defers, atomic --if idl
     assert.equal(st2.history[0].outcome, "resumed");
   }
 
-  // #12 / F10: Five transient `hc get` failures drop entry AND clear lastInspected so recovery re-inspects unchanged terminal!
+  // #19 / F10: Transient `hc get` failures survive 5+ outages (MAX_GET_FAILURES=12), drop after MAX_GET_FAILURES
+  //            and clear lastInspected so unchanged terminal re-inspects cleanly; preGet success does NOT reset getFailures!
   {
     let getFail = true;
-    const codexTerm = makeTerminal({
-      address: "linux/t1",
-      turn: 10,
-      program: { key: "codex", name: "Codex", agent: true, shell: false },
-      foreground: { pid: 200, name: "codex" },
-      report: { app: "codex", state: "idle" },
-      labels: {},
-      argv: ["codex"],
-    });
+    const reset1m = T0 + MIN;
     const h = createHarness({
       nowMs: T0,
-      terminals: [codexTerm],
+      terminals: [makeTerminal({ address: "linux/t1", turn: 10 })],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: UUID_ERR,
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: reset1m / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
       hcHandler: async (args) => {
-        if (args[0] === "read") return { code: 0, stdout: "Error: usage_limit_reached. Try again in 1m.\n› ", stderr: "" };
         if (args[0] === "get") {
           if (getFail) return { code: 1, stdout: "", stderr: "unreachable" };
-          return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
+          return { code: 0, stdout: JSON.stringify(makeFreshGet({ address: "linux/t1", turn: 10 })), stderr: "" };
         }
         return { code: 0, stdout: "", stderr: "" };
       },
@@ -1785,29 +2035,100 @@ test("hardening A6/F6/F10 (#4, #6, #12): replaced banner defers, atomic --if idl
     await eng.tick();
     assert.equal(eng.getState().queue.length, 1);
 
-    // 4 transient failures -> stays queued
-    for (let i = 0; i < 4; i++) {
-      h.advance(3 * MIN);
+    // 5 transient failures after +1m reset -> STILL queued (not lost at 5!)
+    h.setNow(reset1m + MIN + 1000);
+    for (let i = 0; i < 5; i++) {
       const st = await eng.tick();
       assert.equal(st.queue.length, 1);
       assert.equal(st.queue[0].getFailures, i + 1);
+      h.advance(35_000);
     }
 
-    // 5th transient failure -> dropped as skipped-closed with remember: false & lastInspected cleared
-    h.advance(3 * MIN);
-    const st5 = await eng.tick();
-    assert.equal(st5.queue.length, 0);
-    assert.equal(st5.history[0].outcome, "skipped-closed");
-
-    // Remote host recovers with UNCHANGED turn/status signature -> re-inspected, re-queued, and resumed!
+    // Host recovers on tick 6 -> +1m Claude transcript entry STILL fires cleanly!
     getFail = false;
-    h.advance(15_000);
-    const stRec = await eng.tick();
-    assert.equal(stRec.queue.length, 1, "unchanged terminal must be re-inspected after 5 transient get failures");
-    h.advance(3 * MIN);
     const stSent = await eng.tick();
     assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
     assert.equal(stSent.history[0].outcome, "resumed");
+  }
+
+  // #19: preGet succeeds while finalGet fails repeatedly -> getFailures increments past 1 and eventually drops!
+  {
+    let getCalls = 0;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal({ address: "linux/t2", turn: 10 })],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: UUID_ERR_2,
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: (T0 + MIN) / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") {
+          getCalls += 1;
+          // Odd calls are preGet (succeed), even calls are finalGet (fail)!
+          if (getCalls % 2 === 1) {
+            return { code: 0, stdout: JSON.stringify(makeFreshGet({ address: "linux/t2", turn: 10 })), stderr: "" };
+          }
+          return { code: 1, stdout: "", stderr: "final get transient fail" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    h.setNow(T0 + 2 * MIN + 1000);
+    for (let i = 0; i < engine.MAX_GET_FAILURES - 1; i++) {
+      const st = await eng.tick();
+      assert.equal(st.queue.length, 1);
+      assert.equal(st.queue[0].getFailures, i + 1, "preGet success must NOT reset getFailures");
+      h.advance(35_000);
+    }
+    const stDrop = await eng.tick();
+    assert.equal(stDrop.queue.length, 0);
+    assert.equal(stDrop.history[0].outcome, "skipped-closed");
+  }
+
+  // #19: Claude screen-fallback (code 3 at detection, then 5x code 1 at due time, then code 3) stays queued and resumes!
+  {
+    let execCode = 3;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal({ labels: { "claude.session": UUID_1 } })],
+      execHandler: async () => ({ code: execCode, stdout: "", stderr: "" }),
+      hcHandler: async (args) => {
+        if (args[0] === "read") {
+          return { code: 0, stdout: "You've hit your 5-hour limit · resets 3:10pm (UTC)\n❯ \n", stderr: "" };
+        }
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(makeFreshGet()), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+    assert.equal(eng.getState().queue[0].resetSource, "screen");
+
+    // 5 transient exit-1 transcript failures at due time must NOT drop the valid screen entry!
+    execCode = 1;
+    h.setNow(Date.parse("2026-11-26T15:11:01Z"));
+    for (let i = 0; i < 5; i++) {
+      const st = await eng.tick();
+      assert.equal(st.queue.length, 1);
+      assert.equal(st.queue[0].transcriptFailures, i + 1);
+      h.advance(35_000);
+    }
+
+    // Transcript returns code 3 again -> resumes cleanly!
+    execCode = 3;
+    const stResumed = await eng.tick();
+    assert.equal(stResumed.history[0].outcome, "resumed");
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
   }
 });
 
@@ -2206,16 +2527,16 @@ test("hardening: immediate cancel & disable during stagger/fire, missing turn fa
   }
 });
 
-test("hardening (#14): bounds outstanding hung host calls (<=1 across 25 ticks), uses 75s send timeout, no bare setTimeout", async () => {
+test("hardening (#15): hung host calls evict after TTL, cap globally at 32 across 220 addrs, close() settles wait, 75s send timeout", async () => {
   const { engine } = await loadCore();
   const T0 = Date.parse("2026-11-26T15:00:00Z");
   const MIN = 60_000;
   const reset = T0 + 5 * MIN;
 
-  // 1. 25 ticks with hung `hc read` produce AT MOST 1 pending host call (not 25!), then recovers once settled!
+  // 1a. Within eviction window, repeated ticks launch at most 1 hung call; after TTL / p4.mjs P7 hang clears -> recovers & queues!
   {
+    let hang = true;
     let readCount = 0;
-    let releaseRead = null;
     const codexTerm = makeTerminal({
       address: "t1",
       program: { key: "codex", name: "Codex", agent: true, shell: false },
@@ -2224,7 +2545,41 @@ test("hardening (#14): bounds outstanding hung host calls (<=1 across 25 ticks),
       labels: {},
       argv: ["codex"],
     });
-    const fakeAfter = (ms, fn) => {
+    const fastTimeoutAfter = (_ms, fn) => {
+      const t = setTimeout(fn, 1);
+      return () => clearTimeout(t);
+    };
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") {
+          readCount += 1;
+          if (hang) return new Promise(() => {}); // NEVER settles!
+          return { code: 0, stdout: "You've hit your usage limit. Try again in 10m.\n› \n", stderr: "" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    // 3 ticks while hung (clock fixed like p4.mjs P7): launches only 1 hung read!
+    for (let i = 0; i < 3; i++) {
+      await eng.tick({ after: fastTimeoutAfter });
+    }
+    assert.equal(readCount, 1, "must not launch duplicate hung reads within eviction window");
+
+    // Hang clears (first promise still never settled!) -> next ticks evict stale hung op and queue!
+    hang = false;
+    for (let i = 0; i < 3; i++) {
+      await eng.tick({ after: fastTimeoutAfter });
+    }
+    assert.equal(eng.getState().queue.length, 1, "p4.mjs P7: hung read must evict so terminal recovers");
+  }
+
+  // 1b. Global cap (MAX_GLOBAL_IN_FLIGHT = 32): rotating through 220 broken addresses never spawns >32 pending host calls!
+  {
+    let totalReads = 0;
+    const immediateTimeoutAfter = (_ms, fn) => {
       let cancelled = false;
       queueMicrotask(() => {
         if (!cancelled) fn();
@@ -2233,36 +2588,112 @@ test("hardening (#14): bounds outstanding hung host calls (<=1 across 25 ticks),
         cancelled = true;
       };
     };
+    const brokenTerms = Array.from({ length: 220 }, (_, i) =>
+      makeTerminal({
+        address: `broken-${i}`,
+        program: { key: "codex", name: "Codex", agent: true, shell: false },
+        foreground: { pid: 200 + i, name: "codex" },
+        report: { app: "codex", state: "idle" },
+        labels: {},
+        argv: ["codex"],
+      }),
+    );
     const h = createHarness({
       nowMs: T0,
-      terminals: [codexTerm],
+      terminals: brokenTerms,
       hcHandler: async (args) => {
         if (args[0] === "read") {
-          readCount += 1;
-          if (readCount === 1) {
-            return new Promise((resolve) => {
-              releaseRead = () => resolve({ code: 0, stdout: "", stderr: "" });
-            });
-          }
-          return { code: 0, stdout: "Error: usage_limit_reached. Try again in 2m.\n› ", stderr: "" };
+          totalReads += 1;
+          return new Promise(() => {}); // never settles
         }
         return { code: 0, stdout: "", stderr: "" };
       },
     });
     const eng = engine.createEngine(h.env);
-    for (let i = 0; i < 25; i++) {
-      h.advance(15_000);
-      await eng.tick({ after: fakeAfter });
-    }
-    assert.equal(readCount, 1, "25 ticks with hung screen read must launch at most 1 pending host call");
+    await eng.tick({ after: immediateTimeoutAfter });
+    assert.equal(totalReads, engine.MAX_GLOBAL_IN_FLIGHT, "220 broken addresses must be capped at MAX_GLOBAL_IN_FLIGHT (32)");
+    assert.equal(engine.MAX_GLOBAL_IN_FLIGHT, 32);
+  }
 
-    // Once the hung call finally settles, the next tick can issue a fresh read and detect the banner!
-    releaseRead();
-    await new Promise((r) => setImmediate(r));
-    h.advance(15_000);
-    const st = await eng.tick({ after: () => () => {} });
-    assert.equal(readCount, 2);
-    assert.equal(st.queue.length, 1);
+  // 1c. close() immediately settles any pending wait promise on a hung host call!
+  {
+    const codexTerm = makeTerminal({
+      address: "t1",
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "idle" },
+      labels: {},
+      argv: ["codex"],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return new Promise(() => {}); // never settles
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    const tickPromise = eng.tick({ after: () => () => {} });
+    await Promise.resolve();
+    eng.close();
+    // Must settle immediately without hanging!
+    const settled = await Promise.race([
+      tickPromise.then(() => "settled"),
+      new Promise((r) => setTimeout(() => r("hung"), 200)),
+    ]);
+    assert.equal(settled, "settled", "close() must immediately settle pending hung host call waits");
+  }
+
+  // 1d. `hc send` timing out after HC_SEND_TIMEOUT_MS records uncertain timeout failure and never retries!
+  {
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal()],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: UUID_ERR,
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: reset / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(makeFreshGet()), stderr: "" };
+        if (args[0] === "send") return new Promise(() => {}); // hangs past 75s deadline
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick({ after: () => () => {} });
+    h.setNow(reset + MIN);
+    const st = await eng.tick({
+      after: (ms, fn) => {
+        if (ms === engine.HC_SEND_TIMEOUT_MS) {
+          let cancelled = false;
+          queueMicrotask(() => {
+            if (!cancelled) fn();
+          });
+          return () => {
+            cancelled = true;
+          };
+        }
+        return () => {};
+      },
+    });
+    assert.equal(st.history[0].outcome, "failed");
+    assert.equal(st.history[0].detail, "hc send timed out (delivery uncertain; not retrying)");
+    assert.equal(st.queue.length, 0);
+    assert.equal(h.notifyCalls.length, 1);
+    assert.equal(h.notifyCalls[0].title, "Resume timed out for Claude Code");
+    assert.equal(h.notifyCalls[0].level, "warning");
+    // Subsequent tick must NOT retry because episode attempt & cooldown are recorded!
+    h.advance(MIN);
+    await eng.tick({ after: () => () => {} });
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
   }
 
   // 2. Verify `hc send` uses HC_SEND_TIMEOUT_MS (75_000) while `hc get`/`read` use HC_TIMEOUT_MS (10_000)
@@ -2327,15 +2758,11 @@ test("hardening (#14): bounds outstanding hung host calls (<=1 across 25 ticks),
   }
 });
 
-test("hardening (#7): multi-instance concurrent engines send at most once via exclusive claim", async () => {
+test("hardening (#6): concurrent engines across minute boundary & stale clear-history writer send at most once", async () => {
   const { engine, protocol } = await loadCore();
   const T0 = Date.parse("2026-11-26T15:00:00Z");
   const MIN = 60_000;
-  const reset = T0 + 10 * MIN;
 
-  const sharedStore = { [protocol.STATE_KEY]: { version: 1, enabled: true } };
-  const sends = [];
-  let clock = T0;
   const term = makeTerminal({
     address: "t1",
     program: { key: "codex", name: "Codex", agent: true, shell: false },
@@ -2345,41 +2772,167 @@ test("hardening (#7): multi-instance concurrent engines send at most once via ex
     argv: ["codex"],
   });
 
-  // Intentionally give each engine its OWN env wrapper closures over the SAME shared store!
-  const makeEnv = () => ({
-    now: () => clock,
-    terminals: () => [term],
-    panes: () => [],
-    spaces: () => [],
-    shared: (k) => sharedStore[k],
-    setShared: (k, v) => {
-      sharedStore[k] = v;
-    },
-    hc: async (args) => {
-      // Yield a microtask so both engines interleave realistically
-      await Promise.resolve();
-      if (args[0] === "read") return { code: 0, stdout: "Error: usage_limit_reached. Try again in 10m.\n› ", stderr: "" };
-      if (args[0] === "get") return { code: 0, stdout: JSON.stringify(term), stderr: "" };
-      if (args[0] === "send") {
-        sends.push(args);
+  // Case 1 (p5.mjs & Codex #6): Two engines reading the same relative banner across a minute boundary
+  // (15:00:59 vs 15:01:00, and 15:00:30 vs 15:01:10) contend on address-keyed claim and send at most ONCE!
+  for (const [c1Init, c2Init, banner] of [
+    [T0 + 59_000, T0 + 60_000, "You've hit your usage limit. Try again in 1m.\n› "],
+    [T0 + 30_000, T0 + 70_000, "You've hit your usage limit. Try again in 10m.\n› "],
+  ]) {
+    const sharedStore = { [protocol.STATE_KEY]: { version: 1, enabled: true } };
+    const sends = [];
+    let c1 = c1Init;
+    let c2 = c2Init;
+    let releaseA = null;
+    let resolveStarted = null;
+    const startedPromise = new Promise((r) => {
+      resolveStarted = r;
+    });
+    const makeEnv = (getNow, holdFirstSend) => ({
+      now: getNow,
+      terminals: () => [term],
+      panes: () => [],
+      spaces: () => [],
+      shared: (k) => sharedStore[k],
+      setShared: (k, v) => {
+        sharedStore[k] = v;
+      },
+      hc: async (args) => {
+        await Promise.resolve();
+        if (args[0] === "read") return { code: 0, stdout: banner, stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(term), stderr: "" };
+        if (args[0] === "send") {
+          sends.push(args);
+          if (holdFirstSend && !releaseA) {
+            await new Promise((r) => {
+              releaseA = r;
+              resolveStarted();
+            });
+          }
+          return { code: 0, stdout: "", stderr: "" };
+        }
         return { code: 0, stdout: "", stderr: "" };
+      },
+      exec: async () => ({ code: 3, stdout: "", stderr: "" }),
+      notify: () => {},
+      sleep: async () => {},
+      log: () => {},
+    });
+
+    const engA = engine.createEngine(makeEnv(() => c1, true));
+    const engB = engine.createEngine(makeEnv(() => c2, false));
+    await engA.tick();
+    await engB.tick();
+
+    c1 = T0 + 13 * MIN;
+    c2 = c1 + 40_000;
+    const pA = engA.tick();
+    const pB = engB.tick();
+    await Promise.race([startedPromise, Promise.all([pA, pB])]);
+    if (releaseA) releaseA();
+    await Promise.all([pA, pB]);
+
+    assert.equal(sends.length, 1, "two engines across minute boundary must send at most once");
+  }
+
+  // Case 2 (Codex #6 stale writer): Engine B runs `clear-history` while Engine A holds an active claim & pending send.
+  // Engine B's full-state write MUST preserve Engine A's claim and Engine B MUST NOT double-send!
+  {
+    const sharedStore = { [protocol.STATE_KEY]: { version: 1, enabled: true } };
+    const sends = [];
+    let clock = T0;
+    let releaseA = null;
+    let resolveStarted = null;
+    const startedPromise = new Promise((r) => {
+      resolveStarted = r;
+    });
+    const makeEnv = (holdSend) => ({
+      now: () => clock,
+      terminals: () => [term],
+      panes: () => [],
+      spaces: () => [],
+      shared: (k) => sharedStore[k],
+      setShared: (k, v) => {
+        sharedStore[k] = v;
+      },
+      hc: async (args) => {
+        await Promise.resolve();
+        if (args[0] === "read") return { code: 0, stdout: "You've hit your usage limit. Try again in 10m.\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(term), stderr: "" };
+        if (args[0] === "send") {
+          sends.push(args);
+          if (holdSend) {
+            await new Promise((r) => {
+              releaseA = r;
+              resolveStarted();
+            });
+          }
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+      exec: async () => ({ code: 3, stdout: "", stderr: "" }),
+      notify: () => {},
+      sleep: async () => {},
+      log: () => {},
+    });
+
+    const engA = engine.createEngine(makeEnv(true));
+    const engB = engine.createEngine(makeEnv(false));
+    await engA.tick();
+    await engB.tick();
+
+    clock = T0 + 12 * MIN;
+    const pA = engA.tick();
+    await startedPromise;
+    assert.ok(releaseA, "Engine A should hold active claim with send pending");
+
+    // Stale writer Engine B executes clear-history while A's send is still pending!
+    engB.applySyncCommand({ version: 1, id: "stale-clear-1", action: "clear-history", atMs: clock });
+    assert.ok(sharedStore[protocol.STATE_KEY].claims?.t1, "clear-history on Engine B must NOT erase Engine A's claim");
+
+    await engB.tick();
+    releaseA();
+    await pA;
+
+    assert.equal(sends.length, 1, "stale clear-history writer must NOT allow Engine B to double-send");
+    // After Engine A released its claim, Engine B publishing must NOT resurrect A's released claim!
+    assert.equal(sharedStore[protocol.STATE_KEY].claims?.t1, undefined, "Engine A should release its claim after send");
+    engB.applySyncCommand({ version: 1, id: "stale-clear-2", action: "clear-history", atMs: clock + 1000 });
+    assert.equal(sharedStore[protocol.STATE_KEY].claims?.t1, undefined, "Engine B must NOT resurrect Engine A's released claim");
+  }
+
+  // Case 3: Lost claim readback copies external owner into local state.claims so duplicate local queue entry is dropped!
+  {
+    const sharedStore = { [protocol.STATE_KEY]: { version: 1, enabled: true } };
+    let clock = T0;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [term],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "You've hit your usage limit. Try again in 1m.\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(term), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const origSetShared = h.env.setShared;
+    h.env.setShared = (k, v) => {
+      if (k === protocol.STATE_KEY && v?.queue?.[0]?.status === "resuming") {
+        // Simulate another engine winning the claim race in shared state!
+        origSetShared(k, { ...v, claims: { t1: { owner: "other-winner", atMs: h.env.now() } } });
+        return;
       }
-      return { code: 0, stdout: "", stderr: "" };
-    },
-    exec: async () => ({ code: 3, stdout: "", stderr: "" }),
-    notify: () => {},
-    sleep: async () => {},
-    log: () => {},
-  });
-
-  const engA = engine.createEngine(makeEnv());
-  const engB = engine.createEngine(makeEnv());
-
-  await Promise.all([engA.tick(), engB.tick()]);
-  clock = reset + 2 * MIN;
-  await Promise.all([engA.tick(), engB.tick()]);
-
-  assert.equal(sends.length, 1, "two concurrent engines sharing a store must send at most once");
+      origSetShared(k, v);
+    };
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    h.setNow(T0 + 3 * MIN);
+    const st = await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+    assert.equal(st.queue.length, 0, "lost claim to active external owner must drop duplicate local queue entry");
+    assert.equal(st.claims?.t1?.owner, "other-winner");
+    void sharedStore;
+    void clock;
+  }
 });
 
 test("hardening (#8): restored state re-verifies live evidence (forged transcriptUuid on Codex & Claude send 0)", async () => {
@@ -2550,38 +3103,615 @@ test("hardening (#9): cancel during in-flight inspection discards resulting bann
   assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
 });
 
-test("hardening (#7, #16): main.js lifecycle — close() mid-tick aborts with 0 sends & 0 writes; render() dispatches sync commands", async () => {
+test("hardening (#7, #16): main.js lifecycle — close() mid-tick aborts a real due send (control sends 1, close sends 0 & writes 0)", async () => {
   const QuotaResume = await loadMainMod();
-  const { protocol } = await loadCore();
+  const { protocol, screen } = await loadCore();
 
-  // 1. Block a due tick inside `hc read`, call `close()`, then release the read -> 0 sends, 0 writes after close!
-  let releaseRead = null;
-  let writesAfterClose = 0;
-  let closedCalled = false;
-  let timerCancelled = false;
-  const sends = [];
-  const store = {
-    [protocol.STATE_KEY]: {
-      version: 1,
-      enabled: true,
-      queue: [
-        {
-          address: "t1",
-          agent: "codex",
-          provider: "codex",
-          detectedAtMs: Date.now() - 120_000,
-          resetsAtMs: Date.now() - 60_000,
-          resumeAtMs: Date.now() - 1000,
-          resetSource: "screen",
-          reason: "usage_limit_reached",
-          errorTurn: 10,
-          errorFingerprint: "screen:t1:codex:codex-usage-limit-reached:abcd",
-          status: "waiting",
-        },
-      ],
-      history: [],
-    },
+  const bannerText = "Error: usage_limit_reached. Try again in 1m.\n› ";
+  const runScenario = async (shouldClose) => {
+    const baseNow = Date.now();
+    const detected = screen.detectScreenRateLimit({
+      agent: "codex",
+      address: "t1",
+      text: bannerText,
+      nowMs: baseNow - 180_000,
+    });
+    let releaseRead = null;
+    let writesAfterClose = 0;
+    let closedCalled = false;
+    let timerCancelled = false;
+    const sends = [];
+    const store = {
+      [protocol.STATE_KEY]: {
+        version: 1,
+        enabled: true,
+        queue: [
+          {
+            address: "t1",
+            agent: "codex",
+            provider: "codex",
+            detectedAtMs: baseNow - 180_000,
+            resetsAtMs: baseNow - 120_000,
+            resumeAtMs: baseNow - 60_000,
+            resetSource: "screen",
+            reason: detected.reason,
+            errorTurn: 10,
+            errorFingerprint: detected.fingerprint,
+            matchedLine: detected.matchedLine,
+            matchedSnippet: detected.normalizedSnippet,
+            status: "waiting",
+          },
+        ],
+        history: [],
+      },
+    };
+    const codexTerm = makeTerminal({
+      address: "t1",
+      turn: 10,
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "idle" },
+      labels: {},
+      argv: ["codex"],
+    });
+
+    globalThis[HERDR_STUB_SYM] = {
+      terminals: () => [codexTerm],
+      panes: () => [],
+      spaces: () => [],
+      shared: (k) => store[k],
+      setShared: (k, v) => {
+        if (closedCalled) writesAfterClose += 1;
+        store[k] = v;
+      },
+      hc: async (args) => {
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
+        if (args[0] === "read") {
+          return new Promise((resolve) => {
+            releaseRead = () => resolve({ code: 0, stdout: bannerText, stderr: "" });
+          });
+        }
+        if (args[0] === "send") {
+          sends.push(args);
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+      exec: async () => ({ code: 3, stdout: "", stderr: "" }),
+      notify: () => {},
+      checking: () => false,
+    };
+
+    const spawnedTasks = [];
+    const fakeCx = {
+      timer: {
+        every: () => ({
+          cancel: () => {
+            timerCancelled = true;
+          },
+        }),
+        after: () => ({ cancel: () => {} }),
+      },
+      sleep: async () => {},
+      spawn: (fn) => {
+        const p = fn(fakeCx);
+        spawnedTasks.push(p);
+        return p;
+      },
+    };
+
+    const view = new QuotaResume();
+    view.init({}, fakeCx);
+
+    for (let i = 0; i < 10 && !releaseRead; i++) {
+      await Promise.resolve();
+    }
+    assert.ok(releaseRead, "main.js tick should be blocked inside hc read");
+
+    // Test render() sync command dispatch
+    store[protocol.COMMAND_KEY] = { version: 1, id: `sync-clear-${shouldClose}`, action: "clear-history", atMs: Date.now() };
+    view.render(fakeCx);
+    assert.equal(view.engine.getState().lastHandledCommandId, `sync-clear-${shouldClose}`);
+
+    if (shouldClose) {
+      closedCalled = true;
+      view.close();
+      assert.equal(timerCancelled, true);
+      assert.equal(view.engine.isClosed(), true);
+    }
+
+    releaseRead();
+    await Promise.all(spawnedTasks);
+    if (!shouldClose) view.close();
+    return { sends, writesAfterClose };
   };
+
+  // Control run WITHOUT close() MUST send 1 (proving the fixture truly sends when not closed!)
+  const control = await runScenario(false);
+  assert.equal(control.sends.length, 1, "control run without close() must send 1");
+
+  // Run WITH close() mid-tick MUST produce 0 sends and 0 writes after close!
+  const closed = await runScenario(true);
+  assert.equal(closed.sends.length, 0, "close() mid-tick must produce 0 sends");
+  assert.equal(closed.writesAfterClose, 0, "close() mid-tick must produce 0 setShared writes");
+});
+
+
+test("followups (#2, #11, #17): rejects prose with retry time & quoted logs, accepts all 3 valid timed banners, parses GMT-0330", async () => {
+  const { engine, screen } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+
+  // #2: Prose with retry time & quoted/logged output MUST be rejected (0 queued, 0 sends)
+  const rejectCases = [
+    ["codex", "Rate limit exceeded. Try again in 1m if the request fails.\n› "],
+    ["codex", "Here is the log I saw:\n  Rate limit exceeded. Try again in 10m.\n\n› \n"],
+    ["opencode", "Here is the log I saw:\nRate limit exceeded. Try again in 10m.\n\n› \n"],
+  ];
+  for (const [agent, text] of rejectCases) {
+    assert.equal(screen.detectScreenRateLimit({ agent, address: "t1", text, nowMs: T0 }), null, `reject: ${text}`);
+    const term = makeTerminal({
+      address: "t1",
+      program: { key: agent, name: agent, agent: true, shell: false },
+      foreground: { pid: 200, name: agent },
+      report: { app: agent, state: "idle" },
+      labels: {},
+      argv: [agent],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [term],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: text, stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(term), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 0);
+    h.advance(12 * MIN);
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+
+  // #17: All three valid timed banners MUST queue and send once!
+  const validTimedCases = [
+    {
+      name: "Claude (transcript exit 3 + Cooked chrome)",
+      agent: "claude",
+      labels: { "claude.session": UUID_1 },
+      text: "You've hit your 5-hour limit · resets in 1m.\n✻ Cooked for 12s\n❯ ",
+    },
+    {
+      name: "Codex (contact your admin)",
+      agent: "codex",
+      labels: {},
+      text: "You've hit your usage limit. To get more access, contact your admin or try again in 1m.\n› ",
+    },
+    {
+      name: "OpenCode (provider throttled + empty bar composer)",
+      agent: "opencode",
+      labels: {},
+      text: "429 Too Many Requests: provider throttled this request. Retry after 1m.\n┃  \n┃  Build  Claude",
+    },
+  ];
+  for (const tc of validTimedCases) {
+    const term = makeTerminal({
+      address: "t1",
+      program: { key: tc.agent, name: tc.agent, agent: true, shell: false },
+      foreground: { pid: 200, name: tc.agent },
+      report: { app: tc.agent, state: "idle" },
+      labels: tc.labels,
+      argv: [tc.agent],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [term],
+      execHandler: async () => ({ code: 3, stdout: "", stderr: "" }),
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: tc.text, stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(term), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1, `${tc.name}: must queue`);
+    h.advance(3 * MIN);
+    const st = await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1, `${tc.name}: must send once`);
+    assert.equal(st.history[0].outcome, "resumed", tc.name);
+  }
+
+  // #11: Offset timezone GMT-0330 & bare numeric -0330 parse as 22:30:00.000Z (not 22:00:00.000Z)
+  assert.equal(
+    new Date(screen.parseResetTime("resets at 19:00 GMT-0330", T0)).toISOString(),
+    "2026-11-26T22:30:00.000Z",
+  );
+  assert.equal(
+    new Date(screen.parseResetTime("resets at 19:00 (GMT-0330)", T0)).toISOString(),
+    "2026-11-26T22:30:00.000Z",
+  );
+  assert.equal(
+    new Date(screen.parseResetTime("resets at 19:00 -0330", T0)).toISOString(),
+    "2026-11-26T22:30:00.000Z",
+  );
+  assert.equal(
+    new Date(screen.parseResetTime("Nov 26 at 19:00 GMT-0330", T0)).toISOString(),
+    "2026-11-26T22:30:00.000Z",
+  );
+});
+
+test("followups (#3): rejects non-entrypoint scripts in codex folder, attached -e/-p eval flags, and npx -c/--call", async () => {
+  const { engine } = await loadCore();
+
+  assert.equal(engine.identifyForegroundAgent({ name: "node", argv: ["node", "/tmp/codex/report.js"] }), null);
+  assert.equal(engine.identifyForegroundAgent({ name: "node", argv: ["node", "-econsole.log(1)", "codex"] }), null);
+  assert.equal(engine.identifyForegroundAgent({ name: "node", argv: ["node", "-p1+1", "claude"] }), null);
+  assert.equal(engine.identifyForegroundAgent({ name: "bun", argv: ["bun", "-eprocess.exit(0)", "opencode"] }), null);
+  assert.equal(engine.identifyForegroundAgent({ name: "npx", argv: ["npx", "-c", "codex"] }), null);
+  assert.equal(engine.identifyForegroundAgent({ name: "npx", argv: ["npx", "--call", "codex"] }), null);
+  assert.equal(engine.identifyForegroundAgent({ name: "npx", argv: ["npx", "--call=codex", "codex"] }), null);
+  assert.equal(engine.identifyForegroundAgent({ name: "node", argv: ["node", "/x/claude-code/cli.js"] }), "claude");
+  assert.equal(
+    engine.identifyForegroundAgent({ name: "node", argv: ["node", "/usr/lib/node_modules/@openai/codex/dist/anything.js"] }),
+    "codex",
+  );
+});
+
+test("followups (#4): ignores ISO timestamp above replacement banner & defers to newer Claude transcript error B", async () => {
+  const { engine, screen } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+
+  // 4a. Neighboring ISO timestamp ABOVE replacement banner MUST NOT win parseResetTime!
+  {
+    let screenText = "Error: usage_limit_reached. Try again in 1m.\n› ";
+    const codexTerm = makeTerminal({
+      address: "t1",
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "idle" },
+      labels: {},
+      argv: ["codex"],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: screenText, stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+
+    screenText = "Last request logged 2026-11-26T15:01:00Z\nError: usage_limit_reached. Try again in 5h.\n› ";
+    const det = screen.detectScreenRateLimit({ agent: "codex", address: "t1", text: screenText, nowMs: T0 + 2 * MIN });
+    assert.equal(det.resetsAtMs, T0 + 2 * MIN + 5 * HOUR, "line above banner must be ignored");
+
+    h.setNow(T0 + 2 * MIN + 1000);
+    const st = await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, "must NOT send at old 1m deadline");
+    assert.equal(st.queue.length, 1);
+    assert.ok(st.queue[0].resetsAtMs >= T0 + 5 * HOUR);
+  }
+
+  // 4b. Claude newer quota error B (+5h) appended after A (+1m) on same turn -> updates to B & defers!
+  {
+    const errA = JSON.stringify({
+      type: "assistant",
+      uuid: UUID_ERR,
+      isApiErrorMessage: true,
+      timestamp: new Date(T0).toISOString(),
+      quotaLimits: { resetsAt: (T0 + MIN) / 1000, rateLimitType: "five_hour" },
+    });
+    const errB = JSON.stringify({
+      type: "assistant",
+      uuid: UUID_ERR_2,
+      isApiErrorMessage: true,
+      timestamp: new Date(T0 + 30_000).toISOString(),
+      quotaLimits: { resetsAt: (T0 + 5 * HOUR) / 1000, rateLimitType: "seven_day" },
+    });
+    let appendedB = false;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal({ turn: 10 })],
+      execHandler: async () => ({ code: 0, stdout: appendedB ? `${errA}\n${errB}` : errA, stderr: "" }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(makeFreshGet({ turn: 10 })), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue[0].transcriptUuid, UUID_ERR);
+
+    appendedB = true;
+    h.setNow(T0 + 3 * MIN);
+    const stMid = await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, "must NOT send at error A's +1m deadline");
+    assert.equal(stMid.queue.length, 1);
+    assert.equal(stMid.queue[0].transcriptUuid, UUID_ERR_2);
+    assert.equal(stMid.queue[0].resetsAtMs, T0 + 5 * HOUR);
+
+    h.setNow(T0 + 5 * HOUR + 2 * MIN);
+    const stEnd = await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
+    assert.equal(stEnd.history[0].outcome, "resumed");
+  }
+});
+
+test("followups (#7): forged stored reset on genuine Claude/Codex evidence defers; cleared report.msg skips", async () => {
+  const { engine, protocol, screen } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+
+  // 7a. Claude restored entry with genuine live UUID + forged stored reset now-1m (live transcript says now+3h) -> defers, 0 sends!
+  {
+    const liveReset = T0 + 3 * HOUR;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal({ turn: 10 })],
+      sharedInit: {
+        [protocol.STATE_KEY]: {
+          version: 1,
+          enabled: true,
+          queue: [
+            {
+              address: "t1",
+              agent: "claude",
+              provider: "claude",
+              sessionId: UUID_1,
+              transcriptUuid: UUID_ERR,
+              detectedAtMs: T0 - 5 * MIN,
+              resetsAtMs: T0 - MIN, // FORGED past reset
+              resumeAtMs: T0 - 1000,
+              resetSource: "transcript",
+              reason: "five_hour rate limit",
+              errorTurn: 10,
+              errorFingerprint: UUID_ERR,
+              status: "waiting",
+            },
+          ],
+          history: [],
+        },
+      },
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: UUID_ERR,
+          isApiErrorMessage: true,
+          timestamp: new Date(T0 - 5 * MIN).toISOString(),
+          quotaLimits: { resetsAt: liveReset / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(makeFreshGet({ turn: 10 })), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    const st = await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, "forged reset must NOT send early");
+    assert.equal(st.queue.length, 1);
+    assert.equal(st.queue[0].resetsAtMs, liveReset);
+  }
+
+  // 7b. Restored Codex entry with genuine fingerprint + resetsAtMs=now+1m, resumeAtMs=now -> clamped, 0 immediate sends!
+  {
+    const banner = "Error: usage_limit_reached. Try again in 1m.\n› ";
+    const det = screen.detectScreenRateLimit({ agent: "codex", address: "t1", text: banner, nowMs: T0 });
+    const codexTerm = makeTerminal({
+      address: "t1",
+      turn: 10,
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "idle" },
+      labels: {},
+      argv: ["codex"],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm],
+      sharedInit: {
+        [protocol.STATE_KEY]: {
+          version: 1,
+          enabled: true,
+          queue: [
+            {
+              address: "t1",
+              agent: "codex",
+              provider: "codex",
+              detectedAtMs: T0,
+              resetsAtMs: T0 + MIN,
+              resumeAtMs: T0, // FORGED early resumeAtMs
+              resetSource: "screen",
+              reason: det.reason,
+              errorTurn: 10,
+              errorFingerprint: det.fingerprint,
+              matchedLine: det.matchedLine,
+              matchedSnippet: det.normalizedSnippet,
+              status: "waiting",
+            },
+          ],
+          history: [],
+        },
+      },
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: banner, stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    assert.equal(eng.getState().queue[0].resumeAtMs, T0 + 2 * MIN, "normalizeQueueEntry must clamp resumeAtMs");
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+
+  // 7c. Banner seen ONLY in preliminary `report.msg`, cleared by `finalGet` -> skipped-replied, 0 sends!
+  {
+    let getCalls = 0;
+    const codexTermWithMsg = makeTerminal({
+      address: "t1",
+      turn: 10,
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "idle", msg: "You've hit your usage limit. Try again in 1m." },
+      labels: {},
+      argv: ["codex"],
+    });
+    const codexTermCleared = { ...codexTermWithMsg, report: { app: "codex", state: "idle", msg: null } };
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTermWithMsg],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "Normal output\n› ", stderr: "" };
+        if (args[0] === "get") {
+          getCalls += 1;
+          return {
+            code: 0,
+            stdout: JSON.stringify(getCalls === 1 ? codexTermWithMsg : codexTermCleared),
+            stderr: "",
+          };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+
+    h.advance(3 * MIN);
+    const st = await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, "cleared report.msg on finalGet must not send");
+    assert.equal(st.history[0].outcome, "skipped-replied");
+  }
+});
+
+test("followups (#8, #10): cancel survives 100+ evictions on other addrs; missing detection-time turn fetches or fails closed", async () => {
+  const { engine } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+
+  // #8: Hold first read for t1, cancel t1, issue 100+ cancels on other addresses -> t1 STILL cancelled!
+  {
+    let releaseRead = null;
+    const codexTerm = makeTerminal({
+      address: "t1",
+      turn: 10,
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "idle" },
+      labels: {},
+      argv: ["codex"],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") {
+          return new Promise((resolve) => {
+            releaseRead = () =>
+              resolve({ code: 0, stdout: "Error: usage_limit_reached. Try again in 1m.\n› ", stderr: "" });
+          });
+        }
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    const p = eng.tick();
+    await Promise.resolve();
+    assert.ok(releaseRead);
+
+    eng.applySyncCommand({ version: 1, id: "cancel-t1", action: "cancel", address: "t1" });
+    for (let i = 0; i < 110; i++) {
+      eng.applySyncCommand({ version: 1, id: `cancel-other-${i}`, action: "cancel", address: `other-${i}` });
+    }
+    releaseRead();
+    await p;
+
+    assert.equal(eng.getState().queue.length, 0, "t1 must stay cancelled even after 110 cancels on other addresses");
+    h.advance(3 * MIN);
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+
+  // #10a: `terminals()` omits `turn`, `hc get` returns `turn: 99` -> captures errorTurn: 99 and detects later turn change!
+  {
+    let liveTurn = 99;
+    const termNoTurn = makeTerminal({
+      address: "t1",
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "idle" },
+      labels: {},
+      argv: ["codex"],
+    });
+    delete termNoTurn.turn;
+
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [termNoTurn],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "Error: usage_limit_reached. Try again in 1m.\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify({ ...termNoTurn, turn: liveTurn }), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+    assert.equal(eng.getState().queue[0].errorTurn, 99, "must fetch authoritative detection-time turn");
+
+    liveTurn = 100;
+    h.advance(3 * MIN);
+    const st = await eng.tick();
+    assert.equal(st.history[0].outcome, "skipped-replied");
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+
+  // #10b: Both `terminals()` and `hc get` omit `turn` -> fails closed, 0 queued, 0 sends!
+  {
+    const termNoTurn = makeTerminal({
+      address: "t1",
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "idle" },
+      labels: {},
+      argv: ["codex"],
+    });
+    delete termNoTurn.turn;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [termNoTurn],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "Error: usage_limit_reached. Try again in 1m.\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(termNoTurn), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 0, "must fail closed when turn is unavailable at detection time");
+  }
+});
+
+test("followups (#16, #18, size): abandoned claim recovery, dropped write rollback, late evidence, OpenCode wrong provider, compact state", async () => {
+  const { engine, protocol } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+
   const codexTerm = makeTerminal({
     address: "t1",
     turn: 10,
@@ -2592,75 +3722,167 @@ test("hardening (#7, #16): main.js lifecycle — close() mid-tick aborts with 0 
     argv: ["codex"],
   });
 
-  globalThis[HERDR_STUB_SYM] = {
-    terminals: () => [codexTerm],
-    panes: () => [],
-    spaces: () => [],
-    shared: (k) => store[k],
-    setShared: (k, v) => {
-      if (closedCalled) writesAfterClose += 1;
-      store[k] = v;
-    },
-    hc: async (args) => {
-      if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
-      if (args[0] === "read") {
-        return new Promise((resolve) => {
-          releaseRead = () =>
-            resolve({ code: 0, stdout: "Error: usage_limit_reached. Try again in 1m.\n› ", stderr: "" });
-        });
-      }
-      if (args[0] === "send") {
-        sends.push(args);
+  // #16a: Crash after publishing `resuming` before `hc send` delivers -> restart after 6m recovers and sends!
+  {
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "Error: usage_limit_reached. Try again in 1m.\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
         return { code: 0, stdout: "", stderr: "" };
-      }
-      return { code: 0, stdout: "", stderr: "" };
-    },
-    exec: async () => ({ code: 3, stdout: "", stderr: "" }),
-    notify: () => {},
-    checking: () => false,
-  };
+      },
+    });
+    const eng1 = engine.createEngine(h.env);
+    await eng1.tick();
+    // Simulate a crash right after acquireExclusiveClaim published `resuming` (before hc send started)
+    const snapped = h.sharedStore[protocol.STATE_KEY];
+    snapped.queue[0].status = "resuming";
+    snapped.claims = { t1: { owner: "crashed-instance", atMs: T0 + 2 * MIN } };
 
-  const spawnedTasks = [];
-  const fakeCx = {
-    timer: {
-      every: () => ({
-        cancel: () => {
-          timerCancelled = true;
-        },
-      }),
-      after: () => ({ cancel: () => {} }),
-    },
-    sleep: async () => {},
-    spawn: (fn) => {
-      const p = fn(fakeCx);
-      spawnedTasks.push(p);
-      return p;
-    },
-  };
-
-  const view = new QuotaResume();
-  view.init({}, fakeCx);
-
-  // Wait until the initial tick reaches the blocked `hc read`
-  for (let i = 0; i < 10 && !releaseRead; i++) {
-    await Promise.resolve();
+    // 6 minutes later (> 5m CLAIM_TTL_MS): new instance restarts -> claim expired, attempts still 0 -> sends!
+    h.setNow(T0 + 8 * MIN);
+    const eng2 = engine.createEngine(h.env);
+    assert.equal(eng2.getState().queue[0].status, "waiting");
+    const st = await eng2.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1, "abandoned pre-send claim must recover after TTL");
+    assert.equal(st.history[0].outcome, "resumed");
   }
-  assert.ok(releaseRead, "main.js tick should be blocked inside hc read");
 
-  // Also test render() sync command dispatch before closing
-  store[protocol.COMMAND_KEY] = { version: 1, id: "sync-clear-1", action: "clear-history", atMs: Date.now() };
-  view.render(fakeCx);
-  assert.equal(view.engine.getState().lastHandledCommandId, "sync-clear-1");
+  // #16b: Dropped `resuming` write in setShared -> rolls back status to "waiting" (never wedges), next tick sends!
+  {
+    let dropResumingWrite = true;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "Error: usage_limit_reached. Try again in 1m.\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const origSetShared = h.env.setShared;
+    h.env.setShared = (k, v) => {
+      if (dropResumingWrite && k === protocol.STATE_KEY && v?.queue?.[0]?.status === "resuming") {
+        dropResumingWrite = false;
+        return; // drop the write!
+      }
+      origSetShared(k, v);
+    };
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    h.setNow(T0 + 3 * MIN);
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+    assert.equal(eng.getState().queue[0].status, "waiting", "failed claim readback must roll back to waiting");
 
-  // Close the view while tick is in flight, then release the blocked read!
-  closedCalled = true;
-  view.close();
-  assert.equal(timerCancelled, true);
-  assert.equal(view.engine.isClosed(), true);
+    // Next tick succeeds cleanly!
+    h.advance(15_000);
+    const st2 = await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
+    assert.equal(st2.history[0].outcome, "resumed");
+  }
 
-  releaseRead();
-  await Promise.all(spawnedTasks);
+  // #18a: Timeless banner whose 100% usage report arrives one tick later -> re-scans with unchanged terminal signature & queues!
+  {
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "Error: usage_limit_reached.\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 0, "no usage report yet");
 
-  assert.equal(sends.length, 0, "close() mid-tick must produce 0 sends");
-  assert.equal(writesAfterClose, 0, "close() mid-tick must produce 0 setShared writes");
+    // Next tick: matching 100% Codex usage report arrives while terminal signature is UNCHANGED!
+    h.advance(15_000);
+    h.sharedStore[protocol.USAGE_LIMITS_STATE_KEY] = {
+      codex: {
+        report: {
+          status: "ok",
+          observedAt: Math.floor((T0 + 15_000) / 1000),
+          windows: [{ id: "codex:primary", short: "5h", percent: 100, resetsAt: Math.floor((T0 + HOUR) / 1000) }],
+        },
+      },
+    };
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1, "late 100% usage report must trigger rescan and queue");
+    assert.equal(eng.getState().queue[0].resetSource, "quota");
+  }
+
+  // #18b: Generic OpenCode `Too Many Requests` + unrelated exhausted Claude window -> MUST NOT attach Claude window!
+  {
+    const ocTerm = makeTerminal({
+      address: "t1",
+      turn: 10,
+      program: { key: "opencode", name: "OpenCode", agent: true, shell: false },
+      foreground: { pid: 300, name: "opencode" },
+      report: { app: "opencode", state: "idle" },
+      labels: {},
+      argv: ["opencode"],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [ocTerm],
+      sharedInit: {
+        [protocol.USAGE_LIMITS_STATE_KEY]: {
+          claude: {
+            report: {
+              status: "ok",
+              observedAt: Math.floor(T0 / 1000),
+              windows: [{ id: "session", short: "5h", percent: 100, resetsAt: Math.floor((T0 + HOUR) / 1000) }],
+            },
+          },
+        },
+      },
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "Too Many Requests\n┃  \n┃  Build  Gemini", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(ocTerm), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 0, "generic OpenCode banner must NOT attach unrelated Claude exhausted window");
+  }
+
+  // Size: Bookkeeping caps are reduced (64/32), expired claims/cooldowns prune, and populated state stays compact!
+  {
+    assert.equal(protocol.MAX_HANDLED_FINGERPRINTS, 64);
+    assert.equal(protocol.MAX_HANDLED_BANNERS, 64);
+    assert.equal(protocol.MAX_PROMOTED_EPISODES, 64);
+    assert.equal(protocol.MAX_EPISODE_ATTEMPTS_KEYS, 64);
+    assert.equal(protocol.MAX_TERMINAL_COOLDOWNS, 64);
+    assert.equal(protocol.MAX_CANCEL_EPOCHS, 64);
+    assert.equal(protocol.MAX_CLAIMS, 32);
+
+    // Populated store with expired claims/cooldowns pruned stays well under 15 KB (down from ~60 KB).
+    const rawPopulated = {
+      version: 1,
+      enabled: true,
+      handledFingerprints: Array.from({ length: 200 }, (_, i) => `e0000000-1111-4222-8333-${String(i).padStart(12, "0")}`),
+      handledBanners: Object.fromEntries(
+        Array.from({ length: 32 }, (_, i) => [
+          `linux/t${i}`,
+          { bannerKey: `screen:linux/t${i}:codex:codex-hit-limit:deadbeef`, turn: i, statusMs: T0, resetsAtMs: T0, handledAtMs: T0, cancelled: false },
+        ]),
+      ),
+      promotedEpisodes: Array.from({ length: 32 }, (_, i) => `linux/t${i}:29928500`),
+      episodeAttempts: Object.fromEntries(Array.from({ length: 32 }, (_, i) => [`linux/t${i}:codex:29928500`, 1])),
+      terminalCooldowns: Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`linux/t${i}`, T0 - 20 * MIN])),
+      cancelEpochs: Object.fromEntries(Array.from({ length: 16 }, (_, i) => [`linux/t${i}`, 1])),
+      cancelledSignatures: Object.fromEntries(Array.from({ length: 16 }, (_, i) => [`linux/t${i}`, `10|1000|live|idle|`])),
+      claims: Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`linux/t${i}`, { owner: "qr-1-abc", atMs: T0 - 10 * MIN }])),
+    };
+    const norm = protocol.normalizeState(rawPopulated, T0);
+    assert.equal(norm.handledFingerprints.length, 64);
+    assert.equal(Object.keys(norm.terminalCooldowns).length, 0, "expired cooldowns must be pruned");
+    assert.equal(Object.keys(norm.claims).length, 0, "expired claims must be pruned");
+    const bytes = Buffer.byteLength(JSON.stringify(norm), "utf8");
+    assert.ok(bytes < 15_000, `populated bookkeeping state must be <15 KB (got ${bytes} bytes)`);
+  }
 });

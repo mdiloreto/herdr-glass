@@ -45,11 +45,14 @@ export const HC_SEND_TIMEOUT_MS = 75_000;
 export const SCREEN_READ_LINES = "0";
 export const MAX_COMPLETED_FINGERPRINTS = MAX_HANDLED_FINGERPRINTS;
 export const TERMINAL_COOLDOWN_MS = 10 * 60 * 1000;
-export const SAME_BANNER_SUPPRESS_MS = 2 * 60 * 60 * 1000;
+export const SAME_BANNER_SUPPRESS_MS = TERMINAL_COOLDOWN_MS;
 export const MAX_EPISODE_ATTEMPTS = 1;
-export const MAX_GET_FAILURES = 5;
-export const MAX_IO_FAILURES = 5;
+export const MAX_GET_FAILURES = 12;
+export const MAX_IO_FAILURES = 12;
 export const RETRY_BACKOFF_MS = 30_000;
+export const MAX_GLOBAL_IN_FLIGHT = 32;
+const HUNG_OP_EVICT_MULTIPLIER = 2;
+const HUNG_OP_EVICT_SKIPPED_TICKS = 3;
 
 const IDLE_STATES = new Set(["idle", "done", "error"]);
 const SHELL_RE = /^-?(?:zsh|bash|fish|sh|dash|ksh|tcsh|csh|nu|nushell|pwsh|powershell|cmd)(?:\.exe)?$/i;
@@ -152,6 +155,30 @@ function stripPackageVersion(token) {
   return atVer === -1 ? s : s.slice(0, atVer);
 }
 
+const AGENT_ENTRY_BASENAMES = new Set([
+  "cli.js",
+  "cli.mjs",
+  "cli.cjs",
+  "index.js",
+  "index.mjs",
+  "index.cjs",
+  "bin.js",
+  "bin.mjs",
+  "bin.cjs",
+  "main.js",
+  "main.mjs",
+  "main.cjs",
+  "claude.js",
+  "claude.mjs",
+  "claude.cjs",
+  "codex.js",
+  "codex.mjs",
+  "codex.cjs",
+  "opencode.js",
+  "opencode.mjs",
+  "opencode.cjs",
+]);
+
 function mapScriptTokenToAgent(raw, { allowPackageSpec = false } = {}) {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
@@ -160,9 +187,20 @@ function mapScriptTokenToAgent(raw, { allowPackageSpec = false } = {}) {
   const direct = mapTokenToAgent(candidate);
   if (direct) return direct;
   const normalized = candidate.replace(/\\/g, "/").toLowerCase();
-  if (/(?:^|\/)(?:@anthropic-ai\/)?claude-code(?:\/|$)/.test(normalized)) return "claude";
-  if (/(?:^|\/)(?:@openai\/)?codex(?:\/|$)/.test(normalized)) return "codex";
-  if (/(?:^|\/)(?:opencode-ai\/)?opencode(?:\.exe)?(?:\/|$)/.test(normalized)) return "opencode";
+  if (allowPackageSpec) {
+    if (/^@anthropic-ai\/claude-code$/.test(normalized)) return "claude";
+    if (/^@openai\/codex$/.test(normalized)) return "codex";
+    if (/^(?:@opencode\/cli|opencode-ai|opencode)$/.test(normalized)) return "opencode";
+  }
+  if (/(?:^|\/)node_modules\/@anthropic-ai\/claude-code\//.test(normalized)) return "claude";
+  if (/(?:^|\/)node_modules\/@openai\/codex\//.test(normalized)) return "codex";
+  if (/(?:^|\/)node_modules\/(?:@opencode\/cli|opencode-ai)\//.test(normalized)) return "opencode";
+  const base = normalized.split("/").pop() || "";
+  if (AGENT_ENTRY_BASENAMES.has(base)) {
+    if (/(?:^|\/)(?:@anthropic-ai\/)?claude-code\//.test(normalized)) return "claude";
+    if (/(?:^|\/)(?:@openai\/)?codex\//.test(normalized)) return "codex";
+    if (/(?:^|\/)(?:@opencode\/cli|opencode-ai|opencode)\//.test(normalized)) return "opencode";
+  }
   return null;
 }
 
@@ -177,7 +215,7 @@ function identifyCommandArgv(argv, startIndex = 0, depth = 0) {
   const base = basenameLowerNoExe(firstRaw);
   if (!RUNTIME_WRAPPERS.has(base)) return null;
 
-  // 1. node / bun / deno: skip leading runtime flags, reject eval/print, inspect ONLY first positional script.
+  // 1. node / bun / deno: skip leading runtime flags, reject eval/print (including attached -e/-p), inspect ONLY first positional script.
   if (JS_RUNTIMES.has(base)) {
     let i = startIndex + 1;
     let sawRunSubcmd = false;
@@ -190,9 +228,8 @@ function identifyCommandArgv(argv, startIndex = 0, depth = 0) {
       }
       if (tok.startsWith("-")) {
         if (
-          tok === "-e" ||
+          /^-(?:e|p)/.test(tok) ||
           tok === "--eval" ||
-          tok === "-p" ||
           tok === "--print" ||
           tok.startsWith("--eval=") ||
           tok.startsWith("--print=")
@@ -261,7 +298,7 @@ function identifyCommandArgv(argv, startIndex = 0, depth = 0) {
     return null;
   }
 
-  // 3. npx: skip flags (-y, --yes, -q, --quiet, -c, -p <pkg>, --package <pkg>), inspect ONLY command/package token.
+  // 3. npx: skip flags (-y, --yes, -q, --quiet, -p <pkg>, --package <pkg>), reject -c/--call, inspect ONLY command/package token.
   if (base === "npx") {
     let i = startIndex + 1;
     while (i < argv.length) {
@@ -270,6 +307,9 @@ function identifyCommandArgv(argv, startIndex = 0, depth = 0) {
       if (tok === "--") {
         i += 1;
         break;
+      }
+      if (tok === "-c" || tok === "--call" || tok.startsWith("--call=")) {
+        return null;
       }
       if (tok === "-p" || tok === "--package") {
         i += 2;
@@ -280,7 +320,6 @@ function identifyCommandArgv(argv, startIndex = 0, depth = 0) {
         tok === "--yes" ||
         tok === "-q" ||
         tok === "--quiet" ||
-        tok === "-c" ||
         tok === "--no" ||
         tok === "--no-install" ||
         tok === "--prefer-offline" ||
@@ -456,19 +495,35 @@ function isScreenFingerprint(fp) {
   return typeof fp === "string" && (fp.startsWith("screen:") || fp.startsWith("report:"));
 }
 
+function usageExhaustedSignature(usageState, nowMs) {
+  if (!usageState || typeof usageState !== "object") return "";
+  const parts = [];
+  for (const p of SUPPORTED_AGENTS) {
+    const found = getProviderReport(usageState, p);
+    if (!found) continue;
+    const exhaustedResets = found.report.windows
+      .map((w) => ({ percent: Number(w.percent), resetsAtMs: toEpochMs(w.resetsAt) }))
+      .filter((w) => Number.isFinite(w.percent) && w.percent >= 100 && w.resetsAtMs != null && w.resetsAtMs > nowMs)
+      .map((w) => w.resetsAtMs)
+      .sort((a, b) => a - b);
+    if (exhaustedResets.length > 0) {
+      parts.push(`${p}:${exhaustedResets.join(",")}`);
+    }
+  }
+  return parts.join("|");
+}
+
 /**
  * Resolves a future reset timestamp from `shared("usage-limits.state")` when an agent
  * hits a limit without an explicit timestamp in its banner.
+ * For OpenCode, ONLY checks `"claude"` or `"codex"` when `bannerText` explicitly names that provider.
  */
 export function resolveQuotaResetFromUsage(usageState, provider, { bannerText = "", nowMs = Date.now() } = {}) {
   const inferred = inferProvider(provider, bannerText);
   const providersToTry = [];
   if (inferred && !providersToTry.includes(inferred)) providersToTry.push(inferred);
-  if (!providersToTry.includes(provider)) providersToTry.push(provider);
-  if (provider === "opencode") {
-    for (const fallback of ["claude", "codex"]) {
-      if (!providersToTry.includes(fallback)) providersToTry.push(fallback);
-    }
+  if (provider !== "opencode" && !providersToTry.includes(provider)) {
+    providersToTry.push(provider);
   }
 
   for (const p of providersToTry) {
@@ -488,11 +543,11 @@ export function resolveQuotaResetFromUsage(usageState, provider, { bannerText = 
 /**
  * Evaluates live `usage-limits.state` for a queued local entry:
  * - Defer if a fresh reading observed at/after `resetsAtMs` is STILL at >=100% with a newer future `resetsAt`.
- * - Set `sawExhausted` ONLY when a window positively matching `entry.resetsAtMs` (within ±2 min)
- *   or matching the constrained window type with matching reset is observed at >=100%.
+ * - Set `sawExhausted` + `exhaustedObservedAtMs` ONLY when a window positively matching `entry.resetsAtMs`
+ *   (within ±2 min) or matching the constrained window type with matching reset is observed at >=100%.
  * - Promote to ready at most once per `(address, resetsAtMs)` episode ONLY when `entry.sawExhausted === true`
- *   AND a later fresh reading (`observedAtMs > entry.detectedAtMs`) has `exhausted.length === 0`
- *   AND the matched constrained window dropped `< 100%`.
+ *   AND a strictly newer reading (`observedAtMs > Math.max(entry.detectedAtMs, entry.exhaustedObservedAtMs)`)
+ *   has `exhausted.length === 0` AND a window matching `entry.resetsAtMs` (±2 min) dropped `< 100%`.
  */
 export function evaluateQuotaForEntry(entry, usageState, nowMs, delaySec, promotedEpisodes = null) {
   if (!entry || entry.machine !== null || entry.status !== "waiting") return null;
@@ -520,6 +575,7 @@ export function evaluateQuotaForEntry(entry, usageState, nowMs, delaySec, promot
         action: "defer",
         resetsAtMs: nextResetsAtMs,
         resumeAtMs: nextResetsAtMs + delaySec * 1000,
+        observedAtMs,
       };
     }
   }
@@ -533,29 +589,40 @@ export function evaluateQuotaForEntry(entry, usageState, nowMs, delaySec, promot
         (constrained.includes(w) && (w.resetsAtMs == null || matchesEntryReset(w, entry.resetsAtMs))),
     );
     if (matchedExhausted) {
-      return { action: "observe-exhausted" };
+      return { action: "observe-exhausted", observedAtMs };
     }
   }
 
-  // 3. Strict early recovery: ONLY promote when `entry.sawExhausted === true` AND a later fresh reading
-  //    shows no exhausted windows and all constrained windows dropped below 100%.
+  // 3. Strict early recovery: ONLY promote when `entry.sawExhausted === true`, reading is strictly newer
+  //    than the exhausted observation, no windows are exhausted, AND a window whose `resetsAtMs` matches
+  //    `entry.resetsAtMs` (±2 min) dropped below 100%.
+  const hasExhaustedObs =
+    typeof entry.exhaustedObservedAtMs === "number" && Number.isFinite(entry.exhaustedObservedAtMs);
+  const minRecoveryObsMs = hasExhaustedObs
+    ? Math.max(entry.detectedAtMs, entry.exhaustedObservedAtMs)
+    : entry.detectedAtMs;
   if (
     entry.sawExhausted === true &&
-    observedAtMs > entry.detectedAtMs &&
-    exhausted.length === 0 &&
-    constrained.length > 0
+    hasExhaustedObs &&
+    observedAtMs > minRecoveryObsMs &&
+    exhausted.length === 0
   ) {
-    const promoKey = promotionEpisodeKey(entry);
-    const alreadyPromoted = Array.isArray(promotedEpisodes)
-      ? promotedEpisodes.includes(promoKey)
-      : promotedEpisodes instanceof Set
-        ? promotedEpisodes.has(promoKey)
-        : false;
-    if (alreadyPromoted) return null;
+    const matchingResetWindows = windows.filter((w) => matchesEntryReset(w, entry.resetsAtMs));
+    if (matchingResetWindows.length > 0) {
+      const promoKey = promotionEpisodeKey(entry);
+      const alreadyPromoted = Array.isArray(promotedEpisodes)
+        ? promotedEpisodes.includes(promoKey)
+        : promotedEpisodes instanceof Set
+          ? promotedEpisodes.has(promoKey)
+          : false;
+      if (alreadyPromoted) return null;
 
-    const allBelow100 = constrained.every((w) => Number.isFinite(w.percentNum) && w.percentNum < 100);
-    if (allBelow100) {
-      return { action: "promote", promoKey };
+      const allBelow100 = matchingResetWindows.every(
+        (w) => Number.isFinite(w.percentNum) && w.percentNum < 100,
+      );
+      if (allBelow100) {
+        return { action: "promote", promoKey };
+      }
     }
   }
 
@@ -686,8 +753,11 @@ export function createEngine(env) {
   const state = normalizeState(env.shared(STATE_KEY), now());
   const lastInspected = new Map();
   const liveSignatures = new Map();
+  const pendingCancelTokens = new Map();
   const inFlightOps = new Map();
+  const liveUnsettledOps = new Set();
   const activeTimeoutCancels = new Set();
+  const activeWaitRejectors = new Set();
   let lastPublishedKey = null;
   let lastResumeSentAtMs = 0;
   let closed = false;
@@ -706,6 +776,14 @@ export function createEngine(env) {
       }
     }
     activeTimeoutCancels.clear();
+    for (const rejectWait of [...activeWaitRejectors]) {
+      try {
+        rejectWait();
+      } catch {
+        // ignore
+      }
+    }
+    activeWaitRejectors.clear();
   }
 
   function rememberFingerprint(fp) {
@@ -716,7 +794,7 @@ export function createEngine(env) {
     return Boolean(fp && state.handledFingerprints.includes(fp));
   }
 
-  function rememberHandledBanner(address, { bannerKey, turn, resetsAtMs, handledAtMs, cancelled }) {
+  function rememberHandledBanner(address, { bannerKey, turn, statusMs, resetsAtMs, handledAtMs, cancelled }) {
     if (!address || !bannerKey) return;
     setBoundedMap(
       state.handledBanners,
@@ -724,6 +802,7 @@ export function createEngine(env) {
       {
         bannerKey,
         turn: typeof turn === "number" && Number.isFinite(turn) ? turn : null,
+        statusMs: typeof statusMs === "number" && Number.isFinite(statusMs) ? statusMs : null,
         resetsAtMs: typeof resetsAtMs === "number" && Number.isFinite(resetsAtMs) ? resetsAtMs : null,
         handledAtMs,
         cancelled: Boolean(cancelled),
@@ -732,9 +811,27 @@ export function createEngine(env) {
     );
   }
 
-  function isBannerSuppressed(address, detected, turn, nowMs) {
+  function isBannerSuppressed(address, detected, turn, statusMs, nowMs) {
     const handled = state.handledBanners[address];
-    if (!handled || handled.bannerKey !== detected.errorFingerprint) return false;
+    if (!handled) {
+      // Upgrade migration: legacy screen/report fingerprints persisted in handledFingerprints
+      // suppress same-turn replay and migrate into handledBanners for future turn/cooldown tracking.
+      if (hasHandledFingerprint(detected.errorFingerprint)) {
+        rememberHandledBanner(address, {
+          bannerKey: detected.errorFingerprint,
+          turn,
+          statusMs,
+          resetsAtMs: detected.resetsAtMs,
+          handledAtMs: nowMs,
+          cancelled: false,
+        });
+        const legacyIdx = state.handledFingerprints.indexOf(detected.errorFingerprint);
+        if (legacyIdx !== -1) state.handledFingerprints.splice(legacyIdx, 1);
+        return true;
+      }
+      return false;
+    }
+    if (handled.bannerKey !== detected.errorFingerprint) return false;
 
     const hasTurn = typeof turn === "number" && Number.isFinite(turn);
     const hasHandledTurn = typeof handled.turn === "number" && Number.isFinite(handled.turn);
@@ -747,7 +844,7 @@ export function createEngine(env) {
     if (hasTurn && hasHandledTurn && turn === handled.turn) {
       return true;
     }
-    // Rapid stale-banner loop guard (2 hours).
+    // Rapid stale-banner loop guard (10m cooldown).
     if (nowMs - handled.handledAtMs >= 0 && nowMs - handled.handledAtMs < SAME_BANNER_SUPPRESS_MS) {
       return true;
     }
@@ -758,6 +855,16 @@ export function createEngine(env) {
       Math.abs(detected.resetsAtMs - handled.resetsAtMs) <= 120_000
     ) {
       return true;
+    }
+    // Overnight stale-banner guard: dateless time-of-day banner ("resets 4pm (UTC)") or unchanged
+    // status_ms where turn only advanced by 1 (from our resume) never rolls forward to fire again.
+    if (hasTurn && hasHandledTurn && turn <= handled.turn + 1) {
+      if (detected.isAbsoluteTimeOfDay) {
+        return true;
+      }
+      if (statusMs != null && handled.statusMs != null && statusMs === handled.statusMs) {
+        return true;
+      }
     }
     return false;
   }
@@ -808,30 +915,7 @@ export function createEngine(env) {
     }
   }
 
-  function syncFromShared(atMs = now()) {
-    if (closed) return;
-    const raw = env.shared(STATE_KEY);
-    if (!raw || typeof raw !== "object") return;
-    const ext = normalizeState(raw, atMs);
-
-    const extUpdatedAtMs =
-      typeof raw.updatedAtMs === "number" && Number.isFinite(raw.updatedAtMs)
-        ? raw.updatedAtMs
-        : null;
-    if (
-      (extUpdatedAtMs !== null && extUpdatedAtMs > state.updatedAtMs) ||
-      (ext.lastHandledCommandId && ext.lastHandledCommandId !== state.lastHandledCommandId)
-    ) {
-      state.enabled = ext.enabled;
-      state.settings.agents = { ...ext.settings.agents };
-      if (ext.lastHandledCommandId) {
-        state.lastHandledCommandId = ext.lastHandledCommandId;
-      }
-      if (extUpdatedAtMs !== null) {
-        state.updatedAtMs = extUpdatedAtMs;
-      }
-    }
-
+  function mergeExternalBookkeeping(ext, atMs) {
     for (const fp of ext.handledFingerprints) {
       if (!state.handledFingerprints.includes(fp)) {
         rememberFingerprint(fp);
@@ -864,6 +948,7 @@ export function createEngine(env) {
       const local = state.cancelEpochs[addr] ?? 0;
       if (ep > local) {
         setBoundedMap(state.cancelEpochs, addr, ep, MAX_CANCEL_EPOCHS);
+        pendingCancelTokens.set(addr, (pendingCancelTokens.get(addr) ?? 0) + 1);
         if (ext.cancelledSignatures[addr]) {
           setBoundedMap(state.cancelledSignatures, addr, ext.cancelledSignatures[addr], MAX_CANCEL_EPOCHS);
         }
@@ -872,20 +957,58 @@ export function createEngine(env) {
         if (idx !== -1) state.queue.splice(idx, 1);
       }
     }
+    // Drop any non-owned local claim that its owner has already released in shared state.
+    for (const [k, local] of Object.entries(state.claims)) {
+      if (local && local.owner !== instanceId && !ext.claims[k]) {
+        delete state.claims[k];
+      }
+    }
     for (const [k, claim] of Object.entries(ext.claims)) {
       if (atMs - claim.atMs > CLAIM_TTL_MS) continue;
+      if (claim.owner === instanceId) continue;
       const local = state.claims[k];
-      if (!local || (local.owner !== instanceId && claim.owner !== instanceId)) {
-        setBoundedMap(state.claims, k, { ...claim }, MAX_CLAIMS);
-      } else if (claim.owner !== instanceId && claim.atMs <= local.atMs) {
+      if (!local || local.owner !== instanceId || claim.atMs <= local.atMs) {
         setBoundedMap(state.claims, k, { ...claim }, MAX_CLAIMS);
       }
     }
   }
 
+  function syncFromShared(atMs = now()) {
+    if (closed) return;
+    const raw = env.shared(STATE_KEY);
+    if (!raw || typeof raw !== "object") return;
+    const ext = normalizeState(raw, atMs);
+
+    const extUpdatedAtMs =
+      typeof raw.updatedAtMs === "number" && Number.isFinite(raw.updatedAtMs)
+        ? raw.updatedAtMs
+        : null;
+    if (
+      (extUpdatedAtMs !== null && extUpdatedAtMs > state.updatedAtMs) ||
+      (ext.lastHandledCommandId && ext.lastHandledCommandId !== state.lastHandledCommandId)
+    ) {
+      state.enabled = ext.enabled;
+      state.settings.agents = { ...ext.settings.agents };
+      if (ext.lastHandledCommandId) {
+        state.lastHandledCommandId = ext.lastHandledCommandId;
+      }
+      if (extUpdatedAtMs !== null) {
+        state.updatedAtMs = extUpdatedAtMs;
+      }
+    }
+
+    mergeExternalBookkeeping(ext, atMs);
+  }
+
   function publish(force = false) {
     if (closed) return false;
     const atMs = now();
+    // Always merge external bookkeeping (claims, attempts, cooldowns, cancels) before writing
+    // so a stale writer (e.g. clear-history on another instance) never erases another instance's active claim.
+    const raw = env.shared(STATE_KEY);
+    if (raw && typeof raw === "object") {
+      mergeExternalBookkeeping(normalizeState(raw, atMs), atMs);
+    }
     pruneTransientMaps(atMs);
     const key = stateComparableKey(state);
     if (!force && key === lastPublishedKey) return false;
@@ -903,6 +1026,7 @@ export function createEngine(env) {
         rememberHandledBanner(entry.address, {
           bannerKey: entry.errorFingerprint,
           turn: entry.errorTurn,
+          statusMs: entry.errorStatusMs ?? null,
           resetsAtMs: entry.resetsAtMs,
           handledAtMs: atMs,
           cancelled: cancelled || outcome === "cancelled",
@@ -954,12 +1078,44 @@ export function createEngine(env) {
     return wrappedCancel;
   }
 
-  async function runBoundedHostCall(opKey, invokeFn, { timeoutMs, after = defaultAfter } = {}) {
+  function evictExpiredHungOps(atMs = now()) {
+    for (const [k, op] of [...inFlightOps.entries()]) {
+      if (!op) {
+        inFlightOps.delete(k);
+        continue;
+      }
+      if (op.timedOut && (atMs - op.startedAtMs >= op.evictAfterMs || op.skippedChecks >= HUNG_OP_EVICT_SKIPPED_TICKS)) {
+        inFlightOps.delete(k);
+      }
+    }
+  }
+
+  async function runBoundedHostCall(opKey, invokeFn, { timeoutMs, after = defaultAfter, address = null } = {}) {
     if (closed) {
       throw new Error("engine closed");
     }
+    const startedAtMs = now();
+    evictExpiredHungOps(startedAtMs);
+
     if (opKey && inFlightOps.has(opKey)) {
-      throw new Error(`host op ${opKey} still in flight`);
+      const existing = inFlightOps.get(opKey);
+      if (existing.timedOut) {
+        existing.skippedChecks += 1;
+        if (
+          startedAtMs - existing.startedAtMs >= existing.evictAfterMs ||
+          existing.skippedChecks >= HUNG_OP_EVICT_SKIPPED_TICKS
+        ) {
+          inFlightOps.delete(opKey);
+        } else {
+          throw new Error(`host op ${opKey} still in flight`);
+        }
+      } else {
+        throw new Error(`host op ${opKey} still in flight`);
+      }
+    }
+
+    if (liveUnsettledOps.size >= MAX_GLOBAL_IN_FLIGHT) {
+      throw new Error("global in-flight host call limit reached");
     }
 
     let opPromise;
@@ -969,30 +1125,49 @@ export function createEngine(env) {
       opPromise = Promise.reject(e);
     }
 
+    liveUnsettledOps.add(opPromise);
+    const cleanupGlobal = () => {
+      liveUnsettledOps.delete(opPromise);
+    };
+    opPromise.then(cleanupGlobal, cleanupGlobal);
+
+    let opRecord = null;
     if (opKey) {
-      inFlightOps.set(opKey, opPromise);
-      const cleanup = () => {
-        if (inFlightOps.get(opKey) === opPromise) {
+      opRecord = {
+        promise: opPromise,
+        startedAtMs,
+        evictAfterMs: Math.max(1000, (timeoutMs || HC_TIMEOUT_MS) * HUNG_OP_EVICT_MULTIPLIER),
+        address,
+        timedOut: false,
+        skippedChecks: 0,
+      };
+      inFlightOps.set(opKey, opRecord);
+      const cleanupOp = () => {
+        if (inFlightOps.get(opKey) === opRecord) {
           inFlightOps.delete(opKey);
         }
       };
-      opPromise.then(cleanup, cleanup);
+      opPromise.then(cleanupOp, cleanupOp);
     }
 
     let cancelTimeout = null;
+    let onCloseReject = null;
     try {
-      const timeoutPromise = new Promise((_, reject) => {
+      const racePromise = new Promise((_, reject) => {
+        onCloseReject = () => reject(new Error("engine closed"));
+        activeWaitRejectors.add(onCloseReject);
         cancelTimeout = scheduleAfter(
           timeoutMs,
-          () => reject(new Error(`host op ${opKey ?? "hc"} timed out`)),
+          () => {
+            if (opRecord) opRecord.timedOut = true;
+            reject(new Error(`host op ${opKey ?? "hc"} timed out`));
+          },
           after,
         );
       });
-      if (!cancelTimeout) {
-        return await opPromise;
-      }
-      return await Promise.race([opPromise, timeoutPromise]);
+      return await Promise.race([opPromise, racePromise]);
     } finally {
+      if (onCloseReject) activeWaitRejectors.delete(onCloseReject);
       if (typeof cancelTimeout === "function") {
         try {
           cancelTimeout();
@@ -1003,8 +1178,8 @@ export function createEngine(env) {
     }
   }
 
-  async function runHc(args, { opKey = null, timeoutMs = hcTimeoutMs, after = defaultAfter } = {}) {
-    return runBoundedHostCall(opKey, () => env.hc(args), { timeoutMs, after });
+  async function runHc(args, { opKey = null, timeoutMs = hcTimeoutMs, after = defaultAfter, address = null } = {}) {
+    return runBoundedHostCall(opKey, () => env.hc(args), { timeoutMs, after, address });
   }
 
   async function readTranscriptTail(sessionId, machine, address = "", afterFn = defaultAfter) {
@@ -1015,7 +1190,7 @@ export function createEngine(env) {
       const res = await runBoundedHostCall(
         opKey,
         () => env.exec("sh", args, { on: machine, timeout: TRANSCRIPT_TIMEOUT_MS }),
-        { timeoutMs: TRANSCRIPT_TIMEOUT_MS + 1000, after: afterFn },
+        { timeoutMs: TRANSCRIPT_TIMEOUT_MS + 1000, after: afterFn, address: address || null },
       );
       if (res && res.code === 0 && typeof res.stdout === "string" && res.stdout.trim()) {
         return { ok: true, entries: parseTranscriptTail(res.stdout), missing: false };
@@ -1035,6 +1210,7 @@ export function createEngine(env) {
         opKey: `${address}:read`,
         timeoutMs: hcTimeoutMs,
         after: afterFn,
+        address,
       });
       if (!res || res.code !== 0) return { ok: false, text: "" };
       return { ok: true, text: extractScreenText(res) };
@@ -1049,6 +1225,7 @@ export function createEngine(env) {
         opKey: `${address}:get`,
         timeoutMs: hcTimeoutMs,
         after: afterFn,
+        address,
       });
       if (!res || res.code !== 0 || typeof res.stdout !== "string" || !res.stdout.trim()) {
         return { ok: false, terminal: null };
@@ -1094,25 +1271,23 @@ export function createEngine(env) {
     }
 
     const freshStatus = terminalStatusWord(fresh);
-    if (freshStatus === "done" || freshStatus === "error") {
-      // Never issue an unconditional `hc send`: wait until terminal reports `idle` for `--if idle`.
-      return { ok: false, outcome: "deferred-status", status: freshStatus };
-    }
-    if (freshStatus !== "idle") {
+    if (!IDLE_STATES.has(freshStatus)) {
       recordOutcome(entry, "skipped-busy", `Terminal is ${freshStatus ?? "busy"}`, atMs);
       return { ok: false, outcome: "skipped-busy" };
     }
 
-    // Fail closed on turn check: if we recorded an errorTurn, require fresh.turn to be present and equal.
-    if (entry.errorTurn != null) {
-      if (typeof fresh.turn !== "number" || !Number.isFinite(fresh.turn)) {
-        recordOutcome(entry, "skipped-replied", "Terminal turn unavailable", atMs);
-        return { ok: false, outcome: "skipped-replied" };
-      }
-      if (fresh.turn !== entry.errorTurn) {
-        recordOutcome(entry, "skipped-replied", "Session turn advanced since error", atMs);
-        return { ok: false, outcome: "skipped-replied" };
-      }
+    // Fail closed on turn check: require both recorded errorTurn and live fresh.turn to be present and equal.
+    if (
+      entry.errorTurn == null ||
+      typeof fresh.turn !== "number" ||
+      !Number.isFinite(fresh.turn)
+    ) {
+      recordOutcome(entry, "skipped-replied", "Terminal turn unavailable", atMs);
+      return { ok: false, outcome: "skipped-replied" };
+    }
+    if (fresh.turn !== entry.errorTurn) {
+      recordOutcome(entry, "skipped-replied", "Session turn advanced since error", atMs);
+      return { ok: false, outcome: "skipped-replied" };
     }
 
     return { ok: true, status: freshStatus };
@@ -1158,6 +1333,7 @@ export function createEngine(env) {
     }
 
     if (cmd.action === "cancel") {
+      pendingCancelTokens.set(cmd.address, (pendingCancelTokens.get(cmd.address) ?? 0) + 1);
       const nextEpoch = getCancelEpoch(cmd.address) + 1;
       setBoundedMap(state.cancelEpochs, cmd.address, nextEpoch, MAX_CANCEL_EPOCHS);
       const liveSig = liveSignatures.get(cmd.address);
@@ -1257,7 +1433,7 @@ export function createEngine(env) {
       }
       // Never schedule via arbitrary fallback without explicit reset time OR usage-limits corroboration.
       if (resetsAtMs == null) {
-        return { ok: true, detected: null };
+        return { ok: true, detected: null, needsUsageEvidence: machine === null };
       }
     }
 
@@ -1273,6 +1449,7 @@ export function createEngine(env) {
         sessionId,
         matchedLine: detected.matchedLine,
         matchedSnippet: detected.normalizedSnippet ?? null,
+        isAbsoluteTimeOfDay: Boolean(detected.isAbsoluteTimeOfDay),
       },
     };
   }
@@ -1350,10 +1527,14 @@ export function createEngine(env) {
         entry.resumeAtMs = decision.resumeAtMs;
         entry.resetSource = "quota";
         entry.sawExhausted = true;
+        entry.exhaustedObservedAtMs = decision.observedAtMs;
+        entry.earlyPromoted = false;
         entry.episodeKey = buildEpisodeKey(entry);
       } else if (decision.action === "observe-exhausted") {
         entry.sawExhausted = true;
+        entry.exhaustedObservedAtMs = decision.observedAtMs;
       } else if (decision.action === "promote") {
+        entry.earlyPromoted = true;
         rememberPromotedEpisode(decision.promoKey);
         if (entry.resumeAtMs > nowMs) {
           entry.resumeAtMs = nowMs;
@@ -1372,8 +1553,14 @@ export function createEngine(env) {
     for (const addr of [...liveSignatures.keys()]) {
       if (!liveAddrs.has(addr)) liveSignatures.delete(addr);
     }
+    for (const [opKey, op] of [...inFlightOps.entries()]) {
+      if (op?.address && !liveAddrs.has(op.address)) {
+        inFlightOps.delete(opKey);
+      }
+    }
 
     const queuedAddrs = new Set(state.queue.map((e) => e.address));
+    const usageSig = usageExhaustedSignature(env.shared(USAGE_LIMITS_STATE_KEY), nowMs);
 
     for (const t of liveTerminals) {
       if (closed) return;
@@ -1382,6 +1569,7 @@ export function createEngine(env) {
       if (closed || !state.enabled) return;
 
       const sig = inspectionSignature(t);
+      const usageScopedSig = `${sig}|usage:${usageSig}`;
       liveSignatures.set(t.address, sig);
 
       if (!isCandidateTerminal(t)) {
@@ -1399,9 +1587,11 @@ export function createEngine(env) {
         delete state.cancelledSignatures[t.address];
       }
 
-      if (lastInspected.get(t.address) === sig) continue;
+      const cachedSig = lastInspected.get(t.address);
+      if (cachedSig === sig || cachedSig === usageScopedSig) continue;
 
       const startEpoch = getCancelEpoch(t.address);
+      const startCancelToken = pendingCancelTokens.get(t.address) ?? 0;
       const probe = await detectRateLimitForTerminal(t, agent, nowMs, afterFn);
       if (closed) return;
 
@@ -1410,7 +1600,11 @@ export function createEngine(env) {
       if (closed) return;
 
       // Cancel arrived while inspection was in flight -> discard detection & tombstone this signature.
-      if (getCancelEpoch(t.address) !== startEpoch) {
+      const cancelledInFlight =
+        (pendingCancelTokens.get(t.address) ?? 0) !== startCancelToken ||
+        getCancelEpoch(t.address) !== startEpoch ||
+        state.cancelledSignatures[t.address] === sig;
+      if (cancelledInFlight) {
         setBoundedMap(state.cancelledSignatures, t.address, sig, MAX_CANCEL_EPOCHS);
         lastInspected.set(t.address, sig);
         if (probe.ok && probe.detected) {
@@ -1418,6 +1612,7 @@ export function createEngine(env) {
             rememberHandledBanner(t.address, {
               bannerKey: probe.detected.errorFingerprint,
               turn: typeof t.turn === "number" ? t.turn : null,
+              statusMs: typeof t.status_ms === "number" && Number.isFinite(t.status_ms) ? t.status_ms : null,
               resetsAtMs: probe.detected.resetsAtMs,
               handledAtMs: now(),
               cancelled: true,
@@ -1434,6 +1629,11 @@ export function createEngine(env) {
         // Inspection failed (transient read/exec error) -> do NOT cache signature so next tick retries.
         continue;
       }
+      if (probe.needsUsageEvidence) {
+        // Timeless banner awaiting 100% usage-limits evidence: re-scan automatically when usage-limits changes.
+        lastInspected.set(t.address, usageScopedSig);
+        continue;
+      }
       lastInspected.set(t.address, sig);
 
       const detected = probe.detected;
@@ -1448,9 +1648,39 @@ export function createEngine(env) {
         continue;
       }
 
-      const turn = typeof t.turn === "number" && Number.isFinite(t.turn) ? t.turn : null;
+      // Require an authoritative detection-time turn so turn checks can never be silently disabled.
+      let turn = typeof t.turn === "number" && Number.isFinite(t.turn) ? t.turn : null;
+      let statusMs =
+        typeof t.status_ms === "number" && Number.isFinite(t.status_ms)
+          ? t.status_ms
+          : typeof t.report?.at === "number" && Number.isFinite(t.report.at)
+            ? t.report.at
+            : null;
+      if (turn === null) {
+        const freshTurnRes = await fetchFreshTerminal(t.address, afterFn);
+        if (closed) return;
+        if (!freshTurnRes.ok) {
+          lastInspected.delete(t.address);
+          continue;
+        }
+        if (typeof freshTurnRes.terminal?.turn === "number" && Number.isFinite(freshTurnRes.terminal.turn)) {
+          turn = freshTurnRes.terminal.turn;
+        }
+        if (
+          statusMs === null &&
+          typeof freshTurnRes.terminal?.status_ms === "number" &&
+          Number.isFinite(freshTurnRes.terminal.status_ms)
+        ) {
+          statusMs = freshTurnRes.terminal.status_ms;
+        }
+      }
+      if (turn === null) {
+        // Fail closed: never queue an entry with errorTurn: null.
+        continue;
+      }
+
       if (isScreenFingerprint(detected.errorFingerprint)) {
-        if (isBannerSuppressed(t.address, detected, turn, nowMs)) {
+        if (isBannerSuppressed(t.address, detected, turn, statusMs, nowMs)) {
           continue;
         }
       } else if (hasHandledFingerprint(detected.errorFingerprint)) {
@@ -1473,6 +1703,8 @@ export function createEngine(env) {
         resetSource: detected.resetSource,
         reason: detected.reason,
         errorTurn: turn,
+        errorStatusMs: statusMs,
+        isAbsoluteTimeOfDay: Boolean(detected.isAbsoluteTimeOfDay),
         errorFingerprint: detected.errorFingerprint,
         episodeKey: null,
         matchedLine: detected.matchedLine ?? null,
@@ -1483,6 +1715,8 @@ export function createEngine(env) {
         transcriptFailures: 0,
         screenFailures: 0,
         sawExhausted: false,
+        exhaustedObservedAtMs: null,
+        earlyPromoted: false,
         lastCheckMs: nowMs,
       };
       entry.episodeKey = buildEpisodeKey(entry);
@@ -1492,6 +1726,15 @@ export function createEngine(env) {
 
       state.queue.push(entry);
       queuedAddrs.add(t.address);
+    }
+  }
+
+  function releaseOwnClaim(claimKey) {
+    if (state.claims[claimKey]?.owner === instanceId) {
+      delete state.claims[claimKey];
+    }
+    if (storeClaimsMap && storeClaimsMap.get(claimKey)?.owner === instanceId) {
+      storeClaimsMap.delete(claimKey);
     }
   }
 
@@ -1511,7 +1754,10 @@ export function createEngine(env) {
       return false;
     }
 
-    const existingStateClaim = state.claims[episodeKey];
+    // Key exclusive claims by address (not minute-bucketed episodeKey) so two engines reading
+    // the same relative banner across a minute boundary contend on the exact same lock.
+    const claimKey = entry.address;
+    const existingStateClaim = state.claims[claimKey];
     if (
       existingStateClaim &&
       existingStateClaim.owner !== instanceId &&
@@ -1521,7 +1767,7 @@ export function createEngine(env) {
     }
 
     if (storeClaimsMap) {
-      const existingMemClaim = storeClaimsMap.get(episodeKey);
+      const existingMemClaim = storeClaimsMap.get(claimKey);
       if (
         existingMemClaim &&
         existingMemClaim.owner !== instanceId &&
@@ -1529,44 +1775,67 @@ export function createEngine(env) {
       ) {
         return false;
       }
-      storeClaimsMap.set(episodeKey, { owner: instanceId, atMs });
+      storeClaimsMap.set(claimKey, { owner: instanceId, atMs });
     }
 
-    setBoundedMap(state.claims, episodeKey, { owner: instanceId, atMs }, MAX_CLAIMS);
+    const prevStatus = entry.status;
+    setBoundedMap(state.claims, claimKey, { owner: instanceId, atMs }, MAX_CLAIMS);
     entry.status = "resuming";
-    entry.attempts += 1;
     entry.lastCheckMs = atMs;
-    recordEpisodeAttempt(episodeKey);
     publish(true);
 
     // Immediate re-read verification to ensure our instance won the shared-state claim.
+    // Roll back local status and claim if the write was dropped or another instance won.
     const reRead = env.shared(STATE_KEY);
-    if (reRead && typeof reRead === "object" && reRead.claims && typeof reRead.claims === "object") {
-      if (reRead.claims[episodeKey]?.owner !== instanceId) {
-        if (storeClaimsMap && storeClaimsMap.get(episodeKey)?.owner === instanceId) {
-          storeClaimsMap.delete(episodeKey);
-        }
-        return false;
+    const wonClaim =
+      reRead &&
+      typeof reRead === "object" &&
+      reRead.claims &&
+      typeof reRead.claims === "object" &&
+      reRead.claims[claimKey]?.owner === instanceId;
+    if (!wonClaim) {
+      entry.status = prevStatus;
+      releaseOwnClaim(claimKey);
+      const extClaim =
+        reRead && typeof reRead === "object" && reRead.claims && typeof reRead.claims === "object"
+          ? reRead.claims[claimKey]
+          : null;
+      if (
+        extClaim &&
+        typeof extClaim.owner === "string" &&
+        extClaim.owner &&
+        extClaim.owner !== instanceId &&
+        typeof extClaim.atMs === "number" &&
+        Number.isFinite(extClaim.atMs) &&
+        atMs - extClaim.atMs <= CLAIM_TTL_MS
+      ) {
+        setBoundedMap(state.claims, claimKey, { owner: extClaim.owner, atMs: extClaim.atMs }, MAX_CLAIMS);
       }
+      return false;
     }
 
     return true;
   }
 
-  async function fireEntry(entry, afterFn = defaultAfter) {
+  async function fireEntry(entry, afterFn = defaultAfter, { manual = false } = {}) {
     if (closed) return { sent: false, outcome: "cancelled" };
     drainPendingSyncCommand();
     syncFromShared(now());
     if (closed) return { sent: false, outcome: "cancelled" };
     const atMs = now();
 
-    // 0. Fast synchronous eligibility, expiry, attempt-cap, and cooldown guards.
+    // 0. Fast synchronous eligibility, expiry, reset-time, attempt-cap, and cooldown guards.
     if (!state.enabled || !state.settings.agents[entry.agent] || !state.queue.includes(entry)) {
       return { sent: false, outcome: "cancelled" };
     }
     if (isEntryExpired(entry, atMs)) {
       recordOutcome(entry, "cancelled", "Expired after reset window passed", atMs);
       return { sent: false, outcome: "cancelled" };
+    }
+    if (!manual && !entry.earlyPromoted && atMs < entry.resetsAtMs) {
+      entry.resumeAtMs = Math.max(entry.resumeAtMs, entry.resetsAtMs + state.settings.delaySec * 1000);
+      entry.lastCheckMs = atMs;
+      return { sent: false, outcome: "deferred" };
     }
     const episodeKey = entry.episodeKey || buildEpisodeKey(entry);
     entry.episodeKey = episodeKey;
@@ -1578,7 +1847,8 @@ export function createEngine(env) {
       recordOutcome(entry, "skipped-busy", "Per-terminal cooldown active", atMs);
       return { sent: false, outcome: "skipped-busy" };
     }
-    const existingClaim = state.claims[episodeKey];
+    const claimKey = entry.address;
+    const existingClaim = state.claims[claimKey];
     if (existingClaim && existingClaim.owner !== instanceId && atMs - existingClaim.atMs <= CLAIM_TTL_MS) {
       const idx = state.queue.indexOf(entry);
       if (idx !== -1) state.queue.splice(idx, 1);
@@ -1588,19 +1858,14 @@ export function createEngine(env) {
     entry.lastCheckMs = atMs;
 
     // 1. Fast pre-check via `hc get <addr> --json` (avoids slow remote I/O on dead/wrong-foreground terminals).
+    //    Do NOT reset `entry.getFailures` on preGet success — only reset after `finalGet` succeeds!
     const preGet = await fetchFreshTerminal(entry.address, afterFn);
     if (closed) return { sent: false, outcome: "cancelled" };
     if (!preGet.ok) {
       return handleTransientGetFailure(entry, now());
     }
-    entry.getFailures = 0;
     const preValid = validateFreshTerminal(preGet.terminal, entry, now());
     if (!preValid.ok) {
-      if (preValid.outcome === "deferred-status") {
-        entry.lastCheckMs = now();
-        entry.resumeAtMs = now() + RETRY_BACKOFF_MS;
-        return { sent: false, outcome: "deferred-status" };
-      }
       return { sent: false, outcome: preValid.outcome };
     }
 
@@ -1626,9 +1891,44 @@ export function createEngine(env) {
         return { sent: false, outcome: "deferred" };
       }
       entry.transcriptFailures = 0;
-      if (!verifyActiveTranscriptError(tRes.entries, entry.transcriptUuid)) {
+      const verify = verifyActiveTranscriptError(tRes.entries, entry.transcriptUuid);
+      if (!verify.ok) {
         recordOutcome(entry, "skipped-replied", "Claude already replied or transcript error missing", now());
         return { sent: false, outcome: "skipped-replied" };
+      }
+      const verifyNowMs = now();
+      if (
+        !manual &&
+        verify.newerError &&
+        verify.newerError.uuid !== entry.transcriptUuid &&
+        verify.newerError.resetsAtMs > entry.resetsAtMs
+      ) {
+        entry.transcriptUuid = verify.newerError.transcriptUuid;
+        entry.errorFingerprint = verify.newerError.uuid;
+        entry.resetsAtMs = verify.newerError.resetsAtMs;
+        entry.resumeAtMs = verify.newerError.resetsAtMs + state.settings.delaySec * 1000;
+        entry.reason = verify.newerError.reason;
+        entry.resetSource = "transcript";
+        entry.sawExhausted = false;
+        entry.exhaustedObservedAtMs = null;
+        entry.earlyPromoted = false;
+        entry.episodeKey = buildEpisodeKey(entry);
+        entry.lastCheckMs = verifyNowMs;
+        return { sent: false, outcome: "deferred" };
+      }
+      if (!manual && verify.resetsAtMs > entry.resetsAtMs) {
+        entry.resetsAtMs = verify.resetsAtMs;
+        entry.resumeAtMs = verify.resetsAtMs + state.settings.delaySec * 1000;
+        entry.earlyPromoted = false;
+        entry.episodeKey = buildEpisodeKey(entry);
+        entry.lastCheckMs = verifyNowMs;
+        return { sent: false, outcome: "deferred" };
+      }
+      if (!manual && !entry.earlyPromoted && verify.resetsAtMs + state.settings.delaySec * 1000 > verifyNowMs) {
+        entry.resetsAtMs = verify.resetsAtMs;
+        entry.resumeAtMs = verify.resetsAtMs + state.settings.delaySec * 1000;
+        entry.lastCheckMs = verifyNowMs;
+        return { sent: false, outcome: "deferred" };
       }
     } else if (entry.agent === "claude" && entry.sessionId && isUuid(entry.sessionId)) {
       // Claude screen-fallback entry: missing transcript (code 3) is allowed to proceed to screen re-check,
@@ -1681,6 +1981,7 @@ export function createEngine(env) {
       return { sent: false, outcome: "skipped-replied" };
     }
 
+    let matchedViaReportMsg = false;
     if (!isTranscriptVerified) {
       const screenNowMs = now();
       const stillActive = detectScreenRateLimit({
@@ -1694,6 +1995,7 @@ export function createEngine(env) {
         recordOutcome(entry, "skipped-replied", "Rate-limit banner no longer active on screen", screenNowMs);
         return { sent: false, outcome: "skipped-replied" };
       }
+      matchedViaReportMsg = stillActive.fingerprint.startsWith("report:");
 
       const bannerChanged =
         stillActive.fingerprint !== entry.errorFingerprint ||
@@ -1708,7 +2010,7 @@ export function createEngine(env) {
           ? stillActive.resetsAtMs != null && stillActive.resetsAtMs > entry.resetsAtMs
           : resetRelativeToDetection != null && resetRelativeToDetection > entry.resetsAtMs + 60_000;
 
-      if (resetShiftedLater && stillActive.resetsAtMs != null) {
+      if (!manual && resetShiftedLater && stillActive.resetsAtMs != null) {
         entry.resetsAtMs = stillActive.resetsAtMs;
         entry.resumeAtMs = stillActive.resetsAtMs + state.settings.delaySec * 1000;
         entry.matchedLine = stillActive.matchedLine;
@@ -1716,12 +2018,14 @@ export function createEngine(env) {
         entry.errorFingerprint = stillActive.fingerprint;
         entry.reason = stillActive.reason;
         entry.resetSource = "screen";
+        entry.isAbsoluteTimeOfDay = Boolean(stillActive.isAbsoluteTimeOfDay);
+        entry.earlyPromoted = false;
         entry.episodeKey = buildEpisodeKey(entry);
         entry.lastCheckMs = screenNowMs;
         return { sent: false, outcome: "deferred" };
       }
 
-      if (bannerChanged && stillActive.resetsAtMs == null) {
+      if (!manual && bannerChanged && stillActive.resetsAtMs == null) {
         const usageState = entry.machine === null ? env.shared(USAGE_LIMITS_STATE_KEY) : null;
         const fromQuota =
           entry.machine === null
@@ -1743,6 +2047,7 @@ export function createEngine(env) {
           entry.reason = stillActive.reason;
           entry.resetSource = "quota";
           entry.provider = fromQuota.provider;
+          entry.earlyPromoted = false;
           entry.episodeKey = buildEpisodeKey(entry);
           entry.lastCheckMs = screenNowMs;
           return { sent: false, outcome: "deferred" };
@@ -1765,41 +2070,68 @@ export function createEngine(env) {
     entry.getFailures = 0;
     const finalValid = validateFreshTerminal(finalGet.terminal, entry, now());
     if (!finalValid.ok) {
-      if (finalValid.outcome === "deferred-status") {
-        entry.lastCheckMs = now();
-        entry.resumeAtMs = now() + RETRY_BACKOFF_MS;
-        return { sent: false, outcome: "deferred-status" };
-      }
       return { sent: false, outcome: finalValid.outcome };
+    }
+
+    // If the banner was matched only via preliminary `report.msg`, confirm it is still active in `finalGet.terminal.report.msg`.
+    if (!isTranscriptVerified && matchedViaReportMsg) {
+      const finalNowMs = now();
+      const finalStillActive = detectScreenRateLimit({
+        agent: entry.agent,
+        address: entry.address,
+        text: sRes.text,
+        reportMsg: finalGet.terminal?.report?.msg ?? null,
+        nowMs: finalNowMs,
+      });
+      if (!finalStillActive) {
+        recordOutcome(entry, "skipped-replied", "Rate-limit banner no longer active on screen", finalNowMs);
+        return { sent: false, outcome: "skipped-replied" };
+      }
     }
 
     // 4. Synchronous atomic exclusive claim across instances + publish "resuming" BEFORE `hc send`!
     if (!acquireExclusiveClaim(entry, episodeKey, now())) {
       const idx = state.queue.indexOf(entry);
-      if (idx !== -1 && state.claims[episodeKey]?.owner && state.claims[episodeKey].owner !== instanceId) {
+      if (idx !== -1 && state.claims[claimKey]?.owner && state.claims[claimKey].owner !== instanceId) {
         state.queue.splice(idx, 1);
       }
       return { sent: false, outcome: "cancelled" };
     }
 
-    // ALWAYS use atomic `--if idle` for every `hc send`.
-    const sendArgs = ["send", "--if", "idle", entry.address, DEFAULT_PROMPT];
+    // Use atomic `--if idle` when terminal reports `idle`. For `done`/`error` terminals
+    // (`hc send --if` only accepts `idle|working`), fire immediately after `finalGet` without `--force`
+    // so `blocked` terminals are still atomically refused by herdr-core.
+    const sendArgs =
+      finalValid.status === "idle"
+        ? ["send", "--if", "idle", entry.address, DEFAULT_PROMPT]
+        : ["send", entry.address, DEFAULT_PROMPT];
 
     let sendRes;
+    let sendTimedOut = false;
     try {
+      // Record attempt only once `hc send` actually starts running so pre-send crashes recover after claim TTL.
+      entry.attempts += 1;
+      recordEpisodeAttempt(episodeKey);
       sendRes = await runHc(sendArgs, {
         opKey: `${entry.address}:send`,
         timeoutMs: hcSendTimeoutMs,
         after: afterFn,
+        address: entry.address,
       });
     } catch (e) {
-      sendRes = { code: 1, stdout: "", stderr: String(e?.message ?? e) };
+      const msg = String(e?.message ?? e);
+      if (/timed out/i.test(msg)) {
+        sendTimedOut = true;
+      }
+      sendRes = { code: 1, stdout: "", stderr: msg };
     }
 
     if (closed) return { sent: false, outcome: "cancelled" };
 
     const doneAtMs = now();
     const label = AGENT_LABELS[entry.agent] ?? entry.agent;
+    releaseOwnClaim(claimKey);
+
     if (sendRes && sendRes.code === 0) {
       recordTerminalCooldown(entry.address, doneAtMs);
       recordOutcome(entry, "resumed", entry.reason, doneAtMs);
@@ -1810,6 +2142,19 @@ export function createEngine(env) {
       });
       publish(true);
       return { sent: true, outcome: "resumed" };
+    }
+
+    if (sendTimedOut) {
+      const timeoutDetail = "hc send timed out (delivery uncertain; not retrying)";
+      recordTerminalCooldown(entry.address, doneAtMs);
+      recordOutcome(entry, "failed", timeoutDetail, doneAtMs);
+      notify({
+        title: `Resume timed out for ${label}`,
+        body: `${entry.title || entry.address}: ${timeoutDetail}`,
+        level: "warning",
+      });
+      publish(true);
+      return { sent: false, outcome: "failed" };
     }
 
     const errDetail = (sendRes?.stderr || sendRes?.stdout || "hc send failed").trim();
@@ -1903,7 +2248,7 @@ export function createEngine(env) {
       }
       publish(true);
       if (entry && entry.status !== "resuming") {
-        await fireEntry(entry, afterFn);
+        await fireEntry(entry, afterFn, { manual: true });
         if (closed) return false;
         publish(true);
       }

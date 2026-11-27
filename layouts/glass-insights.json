@@ -369,7 +369,7 @@
           "id": "usage-limits",
           "type": "block",
           "content": {
-            "mod": "usage-limits"
+            "mod": "usage-limits-fleet-canary"
           },
           "size": {
             "px": 28

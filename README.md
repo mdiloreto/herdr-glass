@@ -164,7 +164,7 @@ Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing
 
 ## Customize
 
-- **Layouts.** `glass-insights` is `glass` with a shorter sidebar footer.
+- **Layouts.** `glass-insights` is `glass` with a shorter sidebar footer. It also mounts the fleet quota bar, `usage-limits-fleet-canary`, in place of `usage-limits`; it shows quotas for every machine Herdr knows.
 - **Themes.** The pack adds `omarchy` and `catppuccin`: `herdr-app do app.theme --name catppuccin`.
 - **Your own copy.** `herdr-app do layout.clone --name glass --as my-glass`, then edit `layouts/my-glass.json` in `~/.config/herdr-app`: colors, gradient, `window_blur`, panel buttons. To keep the layout's own keys, copy the `layout:glass` section of `keys.json` to `layout:my-glass`.
 - **Hide a block.** `herdr-app do layout.hide --id usage-limits`.
@@ -200,7 +200,7 @@ Much of this pack is other people's work. [`PROVENANCE.md`](./PROVENANCE.md) rec
 | [quaresc/cockpit](https://github.com/quaresc/cockpit) | The `cockpit` mod and layout, which bundle Apache-2.0 and MIT code and ISC [Lucide](https://github.com/lucide-icons/lucide) icons ([notices](./LICENSES/quaresc-cockpit.THIRD_PARTY_NOTICES.md)) | MIT and bundled licenses |
 | [linziyanleo/herdr-mods](https://github.com/linziyanleo/herdr-mods) | `preview-plus` ([notices](./mods/preview-plus/THIRD_PARTY.md)) | MIT and bundled licenses |
 | [nozikov/herdr-usage-limits](https://github.com/nozikov/herdr-usage-limits) | `usage-limits`, whose panel icons upstream credits to [Lucide](https://github.com/lucide-icons/lucide) ([notice](./LICENSES/nozikov-herdr-usage-limits.lucide.txt)) | MIT; icons ISC |
-| [mdiloreto/usage-insights](https://github.com/mdiloreto/usage-insights), a fork of [harshcurious/usage-insights](https://github.com/harshcurious/usage-insights) | `insights` | MIT |
+| [mdiloreto/usage-insights](https://github.com/mdiloreto/usage-insights), a fork of [harshcurious/usage-insights](https://github.com/harshcurious/usage-insights) | `insights`, `usage-limits-fleet-canary` (derived from `nozikov/herdr-usage-limits`, MIT) | MIT |
 | [dougcunha/herdr-mods](https://github.com/dougcunha/herdr-mods) | `ci-dash`, which bundles the ISC `yaml` library ([notice](./mods/ci-dash/yaml.LICENSE)) | MIT and ISC |
 | [mrolafsson/herdr-recap](https://github.com/mrolafsson/herdr-recap) | `recap` | MIT |
 | [herunan/herdr-over9k](https://github.com/herunan/herdr-over9k) | Our fork `over9k-prompts` (Timeline) | MIT |

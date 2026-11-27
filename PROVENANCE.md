@@ -26,16 +26,20 @@ All Apache-2.0. Line ranges are those of this repository's files and of the upst
 | --- | --- | --- |
 | `mods/goto/name.js` (whole file) | `herdr-t3:mods/t3-picker/name.js` | Pane namer; we put the agent's session label first |
 | `mods/goto/zoom.js` 5-11 | `herdr-t3:mods/t3-picker/zoom.js` | Unzoom before focusing a pane |
-| `mods/goto/main.js` 399-400, 417-419, 427-428 | `herdr-t3:mods/t3-picker/main.js` 100-101, 115-117, 123-124 | Key hints, search row, footer |
-| `mods/goto/rows.js` 45-48 | `herdr-t3:mods/t3-picker/main.js` 70-71 | Working and blocked marks |
-| `mods/goto/score.js` 17-33 | `herdr-app:defaults/frame/palette/main.js` 113-129 | `fuzzy()`, unchanged |
+| `mods/goto/main.js` 399-400, 403, 417-419, 427-428 | `herdr-t3:mods/t3-picker/main.js` 100-101, 102, 115-117, 123-124 | Key hints, popup frame, search row, footer |
+| `mods/goto/rows.js` 87, 97 | `herdr-t3:mods/t3-picker/main.js` 75, 92 | Row label for screen readers, Back tag |
+| `mods/goto/rows.js` 46-52 | `herdr-app:defaults/mods/agents/main.js` 211-216 | Status marks |
+| `mods/goto/rows.js` 66-80 | `herdr-app:defaults/frame/palette/main.js` 187-203 | Lit matched letters |
+| `mods/goto/score.js` 17-33 | `herdr-app:defaults/frame/palette/main.js` 113-129 | `fuzzy()`, with `export` added |
 | `mods/tui-goto/main.js` 30-64 | `herdr-app:defaults/mods/picker/main.js` 11-35 | Space colors |
 | `mods/tui-goto/main.js` 143-162 | same file, 49-60 | Popup state and machine list |
-| `mods/tui-goto/main.js` 311-323 | same file, 71-76 | Sub-agent count |
+| `mods/tui-goto/main.js` 311-323 | same file, 70-76 | Sub-agent count |
 | `mods/tui-goto/main.js` 605-618 | same file, 120-123 | Status glyph |
 | `mods/tui-goto/main.js` 945-970 | same file, 133-154 | Keeping the selection in view |
+| `mods/tui-goto/main.js` 1006-1018 | same file, 189-202 | New tab and new space rows |
 | `mods/tui-goto/main.js` 1055-1066 | same file, 167 | Space tile |
 | `mods/tui-goto/main.js` 1119-1161 | same file, 208-224 | Tab row |
+| `mods/tui-goto/main.js` 1234-1242 | same file, 227-235 | Popup frame |
 | `mods/tui-goto/main.js` 1494-1528 | same file, 252-254 | Search box |
 | `mods/tui-goto/main.js` 1562-1600 | same file, 258-274 | List and wheel scrolling |
 | `mods/tui-spaces/main.js` 25-59 | same file, 11-35 | Space colors |
@@ -43,8 +47,13 @@ All Apache-2.0. Line ranges are those of this repository's files and of the upst
 | `mods/tui-spaces/main.js` 302-324 | same file, 141-154 | Keeping the selection in view |
 | `mods/tui-spaces/main.js` 360-399 | same file, 187-219 | Row layout |
 | `mods/tui-spaces/main.js` 408-420 | same file, 167 | Space tile |
+| `mods/tui-spaces/main.js` 479-487 | same file, 227-235 | Popup frame |
 | `mods/tui-spaces/main.js` 488-506 | same file, 236-249 | Keyboard handling |
 | `mods/tui-spaces/main.js` 543-601 | same file, 251-275 | Search box and scrolling list |
+
+## Icons in `goto`
+
+`mods/goto/icons/git-branch.svg` and `layers.svg` are identical to icons Herdr App ships, and `search.svg` and `terminal.svg` to icons in `herdr-t3`'s picker. All four are [Lucide](https://github.com/lucide-icons/lucide) icons (ISC); Lucide's license is in `LICENSES/nozikov-herdr-usage-limits.lucide.txt`. `home.svg` matched no third-party copy compared.
 
 ## Forked mods shipped here
 

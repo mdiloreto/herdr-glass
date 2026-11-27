@@ -83,13 +83,13 @@ A token dashboard built from Claude Code, Codex, OpenCode, Pi and Antigravity lo
 
 <img src="docs/images/tree.webp" alt="Session tree listing spaces, tabs and agents with a terminal preview" width="720">
 
-<img src="docs/images/spaces.webp" alt="Space picker showing each space's folder, its branch unless it is main or master, and agent states" width="480">
+<img src="docs/images/spaces.webp" alt="Space picker showing each space's folder, its branch unless it is main, master or the space's name, and agent states" width="480">
 
 ## What tab naming does and sends
 
 The `agent-names` mod runs in the background of the `glass`, `glass-insights`, `omarchy` and `omarchy-next` layouts.
 
-**It also renames tabs you named.** Your name is passed along as a hint and may be replaced: right away for names that existed before the layout first loaded, after 10 minutes for names you type later. Tabs holding only idle shells that you have used keep your name. Unused ones are still marked and closed by tab cleanup, below, even if you named them.
+**It also renames tabs you named.** Your name is passed along as a hint and may be replaced: right away for names that existed before the layout first loaded, after 10 minutes for names you type later. Tabs holding only idle shells that you have used keep your name. Unused ones on this machine are still marked and closed by tab cleanup, below, even if you named them.
 
 **What it sends.** When a tab's panes change, usually at most once every 10 minutes per tab: the space name, any name you typed, and for each pane the program, status, session or terminal title (a shell's title can include your user name, host and path), current step, folder and branch. For up to two panes per tab that run an agent or report a status, and have no title or step, it also reads the last 40 lines on screen and sends up to 480 characters of each.
 
@@ -112,7 +112,7 @@ herdr-app do layout.hide --id agent-names-daemon
 
 Repeat it in each layout you use (`glass`, `glass-insights`, `omarchy`, `omarchy-next`). `layout.show` with the same `--id` turns it back on.
 
-Naming starts as soon as you switch to a layout. For tab naming to send nothing from the start, delete the `agent-names-daemon` block from each of these layouts that you will use (`glass.json`, `glass-insights.json`, `omarchy.json`, `omarchy-next.json` in `~/.config/herdr-app/layouts/`) after installing and before switching to one. The installer then treats those files as edited and no longer updates them. This stops tab naming only: the usage bar still asks `claude` and `codex` for their limits, and opening recap still asks Claude.
+Naming starts as soon as you switch to one of those layouts. For tab naming to send nothing from the start, delete the `agent-names-daemon` block from each of these layouts that you will use (`glass.json`, `glass-insights.json`, `omarchy.json`, `omarchy-next.json` in `~/.config/herdr-app/layouts/`) after installing and before switching to one. The installer then treats those files as edited and no longer updates them. Deleting the block also stops tab cleanup and the session titles in pane headers. Other calls continue: the usage bar still asks `claude` and `codex` for their limits, and opening recap still asks Claude.
 
 ## Install
 
@@ -144,7 +144,7 @@ To update, run `git -C herdr-glass pull`, then `herdr-glass/scripts/install.sh -
 
 ## Requirements
 
-Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing programs and how to get them. Check `sqlite3` yourself, and on Linux also `lsof`, `notify-send` and `setsid`.
+Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing programs and how to get them. Check `curl` and `sqlite3` yourself, and on Linux also `lsof`, `notify-send` and `setsid`.
 
 | Program | Used for |
 | --- | --- |
@@ -167,7 +167,7 @@ Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing
 - **Themes.** The pack adds `omarchy` and `catppuccin`: `herdr-app do app.theme --name catppuccin`.
 - **Your own copy.** `herdr-app do layout.clone --name glass --as my-glass`, then edit `layouts/my-glass.json` in `~/.config/herdr-app`: colors, gradient, `window_blur`, panel buttons. To keep the layout's own keys, copy the `layout:glass` section of `keys.json` to `layout:my-glass`.
 - **Hide a block.** `herdr-app do layout.hide --id usage-limits`.
-- **Keys.** [`keys.fragment.json`](./keys.fragment.json) lists every binding the pack adds. It also hands `ctrl-n` to the terminal program, so `ctrl-n` no longer jumps to the next agent while a terminal has focus, and binds `ctrl-left` and `ctrl-right` to cycle the focused agent and its sub-agents. Your own bindings win. On Linux, Herdr App's default `keys.json` already binds both keys in its `terminal` section to move by words, so inside a terminal they keep doing that. To cycle from a terminal too, set `ctrl-left` to `tui-prefix.prev-subagent` and `ctrl-right` to `tui-prefix.next-subagent` in the `terminal` section of `keys.json`; programs then no longer get those keys. The GitHub keys `ctrl-space alt-o` and `alt-p` need the Herdr terminal app with its `herdr-github` plugin.
+- **Keys.** [`keys.fragment.json`](./keys.fragment.json) lists every binding the pack adds. It also hands `ctrl-n` to the terminal program, so a `keys.json` that binds `ctrl-n` to the next agent no longer does that while a terminal has focus, and binds `ctrl-left` and `ctrl-right` to cycle the focused agent and its sub-agents. Your own bindings win. On Linux, Herdr App's default `keys.json` already binds both arrow keys in its `terminal` section to move by words, so inside a terminal they keep doing that. Where your `terminal` section does not bind them, the pack adds them there too, and terminal programs no longer get those keys. To cycle from a terminal too, set `ctrl-left` to `tui-prefix.prev-subagent` and `ctrl-right` to `tui-prefix.next-subagent` in the `terminal` section of `keys.json`; programs then no longer get those keys. The GitHub keys `ctrl-space alt-o` and `alt-p` need the Herdr terminal app with its `herdr-github` plugin.
 
 Other layouts in the pack:
 
@@ -204,7 +204,8 @@ Much of this pack is other people's work. [`PROVENANCE.md`](./PROVENANCE.md) rec
 | [mrolafsson/herdr-recap](https://github.com/mrolafsson/herdr-recap) | `recap` | MIT |
 | [herunan/herdr-over9k](https://github.com/herunan/herdr-over9k) | Our fork `over9k-prompts` (Timeline) | MIT |
 | [ohneda/herdr-markdown-browser](https://github.com/ohneda/herdr-markdown-browser) | Our fork `markdown-browser` | MIT |
-| [herdrdev/herdr-app](https://github.com/herdrdev/herdr-app) | Our forks `space-folders`, `space-folders-next`; the search scorer in `goto`, from its command palette; parts of `tui-goto` and `tui-spaces`, from its picker | Apache-2.0 |
+| [herdrdev/herdr-app](https://github.com/herdrdev/herdr-app) | Our forks `space-folders`, `space-folders-next`; the search scorer, match highlighting and status marks in `goto`, from its command palette and agents list; parts of `tui-goto` and `tui-spaces`, from its picker | Apache-2.0 |
+| [Lucide](https://github.com/lucide-icons/lucide) | Icons in `goto` ([notice](./LICENSES/nozikov-herdr-usage-limits.lucide.txt)) | ISC |
 
 ## License
 

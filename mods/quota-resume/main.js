@@ -13,7 +13,7 @@ import {
   checking,
 } from "herdr";
 import { COMMAND_KEY } from "./core/protocol.mjs";
-import { DEFAULT_TICK_MS, createEngine } from "./core/engine.mjs";
+import { DEFAULT_TICK_MS, createEngine, isSyncCommand } from "./core/engine.mjs";
 
 export default class QuotaResume extends View {
   init(_props, cx) {
@@ -64,6 +64,36 @@ export default class QuotaResume extends View {
     });
   }
 
+  makeAfter(taskCx) {
+    if (typeof taskCx?.timer?.after === "function") {
+      return (ms, fn) => {
+        const handle = taskCx.timer.after(ms, () => fn());
+        return () => {
+          try {
+            handle?.cancel();
+          } catch {
+            // already fired or cancelled
+          }
+        };
+      };
+    }
+    if (typeof taskCx?.sleep === "function") {
+      return (ms, fn) => {
+        let cancelled = false;
+        taskCx.sleep(ms).then(
+          () => {
+            if (!cancelled) fn();
+          },
+          () => {},
+        );
+        return () => {
+          cancelled = true;
+        };
+      };
+    }
+    return null;
+  }
+
   runTick(cx) {
     if (this.closed || this.tickQueued || !this.engine) return;
     this.tickQueued = true;
@@ -71,6 +101,7 @@ export default class QuotaResume extends View {
       try {
         await this.engine.tick({
           sleep: (ms) => taskCx.sleep(ms),
+          after: this.makeAfter(taskCx),
         });
       } catch (e) {
         console.log(`quota-resume: tick failed: ${e?.message ?? e}`);
@@ -83,9 +114,18 @@ export default class QuotaResume extends View {
   dispatchCommand(cmd, cx) {
     if (this.closed || !this.engine) return;
     this.seenCommandId = cmd.id;
-    this.enqueue(cx, async () => {
+    // Apply cancel/disable/toggle/clear immediately without waiting behind an in-flight tick.
+    if (isSyncCommand(cmd)) {
       try {
-        await this.engine.processCommand(cmd);
+        this.engine.applySyncCommand(cmd);
+      } catch (e) {
+        console.log(`quota-resume: sync command failed: ${e?.message ?? e}`);
+      }
+      return;
+    }
+    this.enqueue(cx, async (taskCx) => {
+      try {
+        await this.engine.processCommand(cmd, { after: this.makeAfter(taskCx) });
       } catch (e) {
         console.log(`quota-resume: command failed: ${e?.message ?? e}`);
       }

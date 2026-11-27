@@ -8,13 +8,14 @@ const ANSI_OSC = /\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g;
 const ANSI_CSI = /\x1B\[[0-?]*[ -/]*[@-~]/g;
 const ANSI_ESC = /\x1B(?:[()][0-9A-Za-z]|[@-Z\\-_])/g;
 const INVISIBLE = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
-const BOX_EDGE = /^[\s─━═│┃┌┐└┘├┤┬┴┼╭╮╰╯·•▪▸▹►]+|[\s─━═│┃┌┐└┘├┤┬┴┼╭╮╰╯·•▪▸▹►]+$/g;
+const BOX_EDGE = /^[\s─━═│┃┌┐└┘├┤┬┴┼╭╮╰╯]+|[\s─━═│┃┌┐└┘├┤┬┴┼╭╮╰╯]+$/g;
 const DIVIDER_ONLY = /^[\s─━═│┃┌┐└┘├┤┬┴┼╭╮╰╯\-_=~·•*]+$/;
 
-// Footer / prompt chrome lines that appear below an error banner at the bottom of TUI screens.
-const CHROME_PATTERNS = [
-  /^[>❯›$%#]\s*$/,
-  /^[>❯›]\s*(?:Try\s+"|Ask\s+|Type\s+|Send\s+|Message\s+)/i,
+const PROMPT_LINE_RE = /^[>❯›»]\s*(.*)$/;
+const PLACEHOLDER_HINT_RE = /^(?:Try\s+"|Ask\s+|Type\s+|Send\s+|Message\s+|Write\s+|Explain\s+|Fix\s+)/i;
+
+// Non-prompt footer chrome lines that appear below the composer at the bottom of TUI screens.
+const FOOTER_CHROME_PATTERNS = [
   /\?\s*for\s+shortcuts/i,
   /shift\+tab\s+to\s+cycle/i,
   /bypass\s+permissions/i,
@@ -26,8 +27,17 @@ const CHROME_PATTERNS = [
   /^\s*enter\s+to\s+(?:send|submit|confirm)/i,
 ];
 
+// Footer / prompt chrome lines that appear below an error banner at the bottom of TUI screens.
+const CHROME_PATTERNS = [
+  /^[>❯›»$%#]\s*$/,
+  /^[>❯›»]\s*(?:Try\s+"|Ask\s+|Type\s+|Send\s+|Message\s+|Write\s+|Explain\s+|Fix\s+)/i,
+  ...FOOTER_CHROME_PATTERNS,
+];
+
 // Prose / conversational markers that disqualify a line from being a genuine error banner.
 const PROSE_DISQUALIFIERS = [
+  /^[•·▪▸▹►\-*]\s/,
+  /\?\s*$/,
   /`[^`]*(?:rate[_ ]limit|usage[_ ]limit|429|quota)[^`]*`/i,
   /["'][^"']*(?:rate[_ ]limit|usage[_ ]limit|429|quota exceeded)[^"']*["']/i,
   /\b(?:for example|e\.g\.|such as|when the user|if you see|handles?\s+the|detects?\s+(?:a|the)|test(?:s|ing)?\s+(?:a|the|for)|regex|pattern|matcher|banner)\b/i,
@@ -36,35 +46,36 @@ const PROSE_DISQUALIFIERS = [
 ];
 
 // Bottom-region window size (above prompt chrome) inspected for error banners.
-const BOTTOM_REGION_LINES = 15;
+export const BOTTOM_REGION_LINES = 15;
+export const MAX_CHROME_LINES = 8;
 
-// Per-agent strict banner patterns. Each entry: { re, reason, key }
+// Per-agent strictly ^-anchored CLI error banner patterns. Each entry: { re, reason, key }
 const CLAUDE_PATTERNS = [
-  { re: /^(?:error:\s*)?you['’]ve\s+hit\s+your\s+(?:usage\s+)?limit\b/i, reason: "usage limit reached", key: "claude-hit-limit" },
-  { re: /^(?:error:\s*)?you['’]ve\s+reached\s+your\s+(?:claude\s+)?usage\s+limit\b/i, reason: "usage limit reached", key: "claude-reached-limit" },
-  { re: /^(?:error:\s*)?(?:claude\s+)?(?:5-hour|five[- ]hour|weekly|session|usage)\s+limit\s+reached\b/i, reason: "usage limit reached", key: "claude-window-limit" },
+  { re: /^(?:(?:api\s+)?error\s*[:\-–]\s*|⚠\s*|!\s*)?you['’]ve\s+hit\s+your\s+(?:(?:5-hour|five[- ]hour|weekly|session|usage)\s+)?limit\b/i, reason: "usage limit reached", key: "claude-hit-limit" },
+  { re: /^(?:(?:api\s+)?error\s*[:\-–]\s*|⚠\s*|!\s*)?you['’]ve\s+reached\s+your\s+(?:claude\s+)?(?:(?:5-hour|five[- ]hour|weekly|session|usage)\s+)?limit\b/i, reason: "usage limit reached", key: "claude-reached-limit" },
+  { re: /^(?:(?:api\s+)?error\s*[:\-–]\s*|⚠\s*|!\s*)?(?:claude\s+)?(?:5-hour|five[- ]hour|weekly|session|usage)\s+limit\s+reached\b/i, reason: "usage limit reached", key: "claude-window-limit" },
   { re: /^(?:api\s+error(?:\s*:\s*429)?|error)\s*[:\-–]\s*(?:rate[_ ]limit(?:_error|_exceeded)?|too\s+many\s+requests|usage\s+limit)\b/i, reason: "API rate limit", key: "claude-api-429" },
-  { re: /\brate_limit_error\b/i, reason: "rate_limit_error", key: "claude-rate-limit-error" },
-  { re: /^(?:error:\s*)?rate\s+limit\s+(?:reached|exceeded)\b/i, reason: "rate limit reached", key: "claude-rate-limit" },
+  { re: /^(?:(?:api\s+)?error\s*[:\-–]\s*|⚠\s*|!\s*)?rate_limit_error\b/i, reason: "rate_limit_error", key: "claude-rate-limit-error" },
+  { re: /^(?:(?:api\s+)?error\s*[:\-–]\s*|⚠\s*|!\s*)?rate\s+limit\s+(?:reached|exceeded)\b/i, reason: "rate limit reached", key: "claude-rate-limit" },
 ];
 
 const CODEX_PATTERNS = [
-  { re: /^(?:error:\s*)?you['’]ve\s+hit\s+your\s+usage\s+limit\b/i, reason: "usage limit reached", key: "codex-hit-limit" },
-  { re: /\busage_limit_reached\b/i, reason: "usage_limit_reached", key: "codex-usage-limit-reached" },
-  { re: /\brate_limit_exceeded\b/i, reason: "rate_limit_exceeded", key: "codex-rate-limit-exceeded" },
-  { re: /^(?:error:\s*|⚠\s*|!\s*)?rate\s+limit\s+(?:reached|exceeded)\b/i, reason: "rate limit reached", key: "codex-rate-limit" },
-  { re: /^(?:error:\s*|⚠\s*|!\s*)?(?:usage\s+limit\s+reached|quota\s+exceeded|insufficient_quota)\b/i, reason: "quota exceeded", key: "codex-quota" },
-  { re: /\b(?:http\s*429|429\s+too\s+many\s+requests)\b/i, reason: "429 Too Many Requests", key: "codex-429" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?you['’]ve\s+hit\s+your\s+(?:usage\s+)?limit\b/i, reason: "usage limit reached", key: "codex-hit-limit" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?usage_limit_reached\b/i, reason: "usage_limit_reached", key: "codex-usage-limit-reached" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?rate_limit_exceeded\b/i, reason: "rate_limit_exceeded", key: "codex-rate-limit-exceeded" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?rate\s+limit\s+(?:reached|exceeded)\b/i, reason: "rate limit reached", key: "codex-rate-limit" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?(?:usage\s+limit\s+reached|quota\s+exceeded|insufficient_quota)\b/i, reason: "quota exceeded", key: "codex-quota" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?(?:http\s*429(?:\s+too\s+many\s+requests)?|429\s+too\s+many\s+requests)\b/i, reason: "429 Too Many Requests", key: "codex-429" },
 ];
 
 const OPENCODE_PATTERNS = [
-  { re: /^(?:error:\s*|⚠\s*|!\s*)?rate\s+limit\s+(?:exceeded|reached)\b/i, reason: "rate limit exceeded", key: "opencode-rate-limit" },
-  { re: /\b(?:rate_limit_exceeded|usage_limit_reached|insufficient_quota)\b/i, reason: "usage limit reached", key: "opencode-limit-code" },
-  { re: /\b(?:http\s*429|429\s+too\s+many\s+requests|status(?:\s+code)?\s*429)\b/i, reason: "429 Too Many Requests", key: "opencode-429" },
-  { re: /^(?:error:\s*|⚠\s*|!\s*)?too\s+many\s+requests\b/i, reason: "Too Many Requests", key: "opencode-tmr" },
-  { re: /^(?:error:\s*|⚠\s*|!\s*)?(?:you['’]ve\s+hit\s+your\s+)?usage\s+limit(?:\s+(?:reached|exceeded))?\b/i, reason: "usage limit reached", key: "opencode-usage-limit" },
-  { re: /^(?:error:\s*|⚠\s*|!\s*)?quota\s+exceeded\b/i, reason: "quota exceeded", key: "opencode-quota" },
-  { re: /^(?:error:\s*|⚠\s*|!\s*)?retry-after\s*[:=]\s*\d+/i, reason: "Retry-After rate limit", key: "opencode-retry-after" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?rate\s+limit\s+(?:exceeded|reached)\b/i, reason: "rate limit exceeded", key: "opencode-rate-limit" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?(?:rate_limit_exceeded|usage_limit_reached|insufficient_quota)\b/i, reason: "usage limit reached", key: "opencode-limit-code" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?(?:http\s*429(?:\s+too\s+many\s+requests)?|429\s+too\s+many\s+requests|status(?:\s+code)?\s*429)\b/i, reason: "429 Too Many Requests", key: "opencode-429" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?too\s+many\s+requests\b/i, reason: "Too Many Requests", key: "opencode-tmr" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?(?:you['’]ve\s+hit\s+your\s+)?usage\s+limit(?:\s+(?:reached|exceeded))?\b/i, reason: "usage limit reached", key: "opencode-usage-limit" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?quota\s+exceeded\b/i, reason: "quota exceeded", key: "opencode-quota" },
+  { re: /^(?:error\s*[:\-–]\s*|⚠\s*|!\s*)?retry-after\s*[:=]\s*\d+/i, reason: "Retry-After rate limit", key: "opencode-retry-after" },
 ];
 
 const AGENT_PATTERNS = {
@@ -124,6 +135,11 @@ function cleanLine(rawLine) {
     .trim();
 }
 
+function isFooterChromeLine(line) {
+  if (!line || DIVIDER_ONLY.test(line)) return true;
+  return FOOTER_CHROME_PATTERNS.some((re) => re.test(line));
+}
+
 function isChromeLine(line) {
   if (!line || DIVIDER_ONLY.test(line)) return true;
   return CHROME_PATTERNS.some((re) => re.test(line));
@@ -131,6 +147,42 @@ function isChromeLine(line) {
 
 function isProseLine(line) {
   return PROSE_DISQUALIFIERS.some((re) => re.test(line));
+}
+
+function normalizeBannerLine(line) {
+  return String(line ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Returns true if the visible screen shows an unsent user draft typed into the
+ * bottom prompt/composer line (ignoring empty prompts and known placeholder hints).
+ */
+export function hasUnsentDraft(screenText) {
+  const stripped = stripAnsi(screenText);
+  if (!stripped) return false;
+  const nonEmpty = [];
+  for (const rawLine of stripped.split(/\r?\n/)) {
+    const line = cleanLine(rawLine);
+    if (!line || DIVIDER_ONLY.test(line)) continue;
+    nonEmpty.push(line);
+  }
+  if (nonEmpty.length === 0) return false;
+
+  // Peel trailing footer status chrome (excluding prompt lines) from the bottom.
+  let idx = nonEmpty.length - 1;
+  let peeled = 0;
+  while (idx >= 0 && peeled < MAX_CHROME_LINES && isFooterChromeLine(nonEmpty[idx])) {
+    idx -= 1;
+    peeled += 1;
+  }
+  if (idx < 0) return false;
+
+  const promptMatch = PROMPT_LINE_RE.exec(nonEmpty[idx]);
+  if (!promptMatch) return false;
+  const draft = promptMatch[1].trim();
+  if (!draft) return false;
+  if (PLACEHOLDER_HINT_RE.test(draft)) return false;
+  return true;
 }
 
 /**
@@ -145,10 +197,10 @@ export function extractBottomRegion(text, maxLines = BOTTOM_REGION_LINES) {
     if (!line || DIVIDER_ONLY.test(line)) continue;
     nonEmpty.push(line);
   }
-  // Peel trailing prompt / footer chrome (up to 8 lines) from the bottom.
+  // Peel trailing prompt / footer chrome (up to MAX_CHROME_LINES) from the bottom.
   let end = nonEmpty.length;
   let peeled = 0;
-  while (end > 0 && peeled < 8 && isChromeLine(nonEmpty[end - 1])) {
+  while (end > 0 && peeled < MAX_CHROME_LINES && isChromeLine(nonEmpty[end - 1])) {
     end -= 1;
     peeled += 1;
   }
@@ -286,7 +338,7 @@ export function parseResetTime(text, nowMs = Date.now()) {
   }
 
   // 3. Explicit date + time: "Oct 15, 3pm (UTC)", "Nov 26, 2026 7:00 PM", "Nov 26 at 19:00 UTC"
-  const monthDateRe = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?(?:\s*(?:,|at)?\s*(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(am|pm)?)?(?:\s*\(([^)]+)\)|\s+(UTC|GMT|[+-]\d{2}:?\d{2}))?/i;
+  const monthDateRe = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?(?:\s*(?:,|at)?\s*(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?(?:\s*(am|pm))?)?(?:\s*\(([^)]+)\)|\s+(UTC|GMT|[+-]\d{2}:?\d{2}))?/i;
   const dateMatch = monthDateRe.exec(s);
   if (dateMatch && dateMatch[4] != null) {
     const month = MONTHS[dateMatch[1].toLowerCase()];
@@ -311,8 +363,8 @@ export function parseResetTime(text, nowMs = Date.now()) {
     }
   }
 
-  // 4. Time-of-day with reset/try-again context: "resets 7pm (UTC)", "resets at 7:30pm", "Try again at 19:00"
-  const timeOfDayRe = /\b(?:resets?(?:\s+at)?|try\s+again\s+at|available\s+at|until|at)\s+(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(am|pm)?(?:\s*\(([^)]+)\)|\s+(UTC|GMT|UTC[+-]\d{1,2}(?::\d{2})?))?/i;
+  // 4. Time-of-day with reset/try-again context: "resets 7pm (UTC)", "resets at 7:30pm", "Try again at 19:00 UTC"
+  const timeOfDayRe = /\b(?:resets?(?:\s+at)?|try\s+again\s+at|available\s+at|until|at)\s+(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?(?:\s*(am|pm))?(?:\s*\(([^)]+)\)|\s+(UTC|GMT|(?:UTC|GMT)[+-]\d{1,2}(?::\d{2})?))?/i;
   const todMatch = timeOfDayRe.exec(s);
   if (todMatch) {
     // Require either ":MM" or "am/pm" so plain numbers like "at 429" are not parsed as times.
@@ -366,29 +418,50 @@ function matchPatterns(agent, line) {
   return null;
 }
 
+function isBannerSuperseded(region, matchIndex) {
+  const below = region.slice(matchIndex + 1);
+  if (below.length === 0) return false;
+  for (let j = 0; j < below.length; j++) {
+    const line = below[j];
+    // An assistant bullet response below the banner means conversation moved on.
+    if (/^[•·▪▸▹►]\s+\S/.test(line)) return true;
+    // A submitted user prompt followed by any output line below it means conversation moved on.
+    const promptMatch = PROMPT_LINE_RE.exec(line);
+    if (promptMatch && promptMatch[1].trim() && j < below.length - 1) return true;
+  }
+  return false;
+}
+
 /**
  * Detects an active rate-limit banner in the bottom screen region (or status report msg).
- * Returns null if no genuine banner is found.
+ * Returns null if no genuine active banner is found.
  */
-export function detectScreenRateLimit({ agent, text, reportMsg = null, nowMs = Date.now() }) {
+export function detectScreenRateLimit({ agent, address = "", text, reportMsg = null, nowMs = Date.now() }) {
   if (!AGENT_PATTERNS[agent]) return null;
 
+  const scope = typeof address === "string" ? address : "";
   const region = extractBottomRegion(text, BOTTOM_REGION_LINES);
   // Search from bottom upwards so the most recent banner wins.
   for (let i = region.length - 1; i >= 0; i--) {
     const line = region[i];
     const match = matchPatterns(agent, line);
     if (!match) continue;
+    // If conversation turns (user prompt + response or assistant bullets) appear below the banner,
+    // the banner is stale/superseded and no longer active.
+    if (isBannerSuperseded(region, i)) {
+      break;
+    }
     // Also inspect the matched line plus immediate neighbor lines (multi-line error boxes)
     // for a reset timestamp, e.g. line 1: "You've hit your usage limit", line 2: "Try again at 7:00 PM".
     const snippet = region.slice(Math.max(0, i - 1), Math.min(region.length, i + 3)).join(" ");
     const resetsAtMs = parseResetTime(snippet, nowMs);
-    const bucket = resetsAtMs != null ? Math.floor(resetsAtMs / 60_000) : line.toLowerCase();
+    const normalized = normalizeBannerLine(line);
     return {
       reason: match.reason,
       resetsAtMs,
       matchedLine: line,
-      fingerprint: `screen:${agent}:${match.key}:${stableHash(String(bucket))}`,
+      // Terminal-scoped and timestamp-independent so stale banners never mint new fingerprints.
+      fingerprint: `screen:${scope}:${agent}:${match.key}:${stableHash(normalized)}`,
     };
   }
 
@@ -398,12 +471,12 @@ export function detectScreenRateLimit({ agent, text, reportMsg = null, nowMs = D
     const match = matchPatterns(agent, cleanMsg);
     if (match) {
       const resetsAtMs = parseResetTime(cleanMsg, nowMs);
-      const bucket = resetsAtMs != null ? Math.floor(resetsAtMs / 60_000) : cleanMsg.toLowerCase();
+      const normalized = normalizeBannerLine(cleanMsg);
       return {
         reason: match.reason,
         resetsAtMs,
         matchedLine: cleanMsg,
-        fingerprint: `report:${agent}:${match.key}:${stableHash(String(bucket))}`,
+        fingerprint: `report:${scope}:${agent}:${match.key}:${stableHash(normalized)}`,
       };
     }
   }

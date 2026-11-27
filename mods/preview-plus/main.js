@@ -302,6 +302,7 @@ export default class PreviewPlus extends View {
           try { value = await readTextFile(selected.file, { on: selected.on }); }
           catch (error) { if (!draft || !this.dirty(draft)) throw error; value = null; }
           if (!this.current(request)) return;
+          request.value = value;
           if (draft && (this.dirty(draft) || draft.saving)) {
             this.document = draft; draft.external = value !== draft.base;
             this.text = draft.text; this.truncated = false;
@@ -340,7 +341,7 @@ export default class PreviewPlus extends View {
 
   poll(cx) {
     const type = kind(this.selected.file);
-    if (type !== "image" && type !== "pdf") { this.reload(cx); return; }
+    if (type !== "image" && type !== "pdf") { if (this.selected.on) this.pollText(cx); else this.reload(cx); return; }
     // Remote media is unsupported; polling must not repeatedly clear that state.
     if (this.selected.on || this.loading || this.mediaPoll === this.request) return;
     const request = this.mediaPoll = this.request, selected = this.selected;
@@ -353,6 +354,21 @@ export default class PreviewPlus extends View {
       } catch (error) {
         if (this.current(request)) { this.error = String(error.message || error); cx.notify(); }
       } finally { if (this.mediaPoll === request) this.mediaPoll = null; }
+    });
+  }
+
+  // Remote files have no folder watcher; reloading an unchanged file would reset the scroll.
+  pollText(cx) {
+    if (this.loading || this.textPoll === this.request) return;
+    const request = this.textPoll = this.request, selected = this.selected;
+    cx.spawn(async cx => {
+      try {
+        const value = await readTextFile(selected.file, { on: selected.on });
+        if (!this.current(request) || this.loading) return;
+        if (value !== request.value) this.load(cx);
+      } catch {
+        if (this.current(request)) this.load(cx);
+      } finally { if (this.textPoll === request) this.textPoll = null; }
     });
   }
 

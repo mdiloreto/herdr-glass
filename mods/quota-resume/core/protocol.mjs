@@ -104,6 +104,7 @@ export function normalizeQueueEntry(
 ) {
   if (!raw || typeof raw !== "object") return null;
   if (typeof raw.address !== "string" || !raw.address) return null;
+  if (machineOf(raw.address) !== null) return null;
   if (!SUPPORTED_AGENTS.includes(raw.agent)) return null;
   if (raw.resetSource === "fallback") return null;
   if (typeof raw.resetsAtMs !== "number" || !Number.isFinite(raw.resetsAtMs)) return null;

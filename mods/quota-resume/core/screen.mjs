@@ -8,21 +8,22 @@ const ANSI_OSC = /\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g;
 const ANSI_CSI = /\x1B\[[0-?]*[ -/]*[@-~]/g;
 const ANSI_ESC = /\x1B(?:[()][0-9A-Za-z]|[@-Z\\-_])/g;
 const INVISIBLE = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
-const BOX_EDGE = /^[\s─━═│┃┌┐└┘├┤┬┴┼╭╮╰╯]+|[\s─━═│┃┌┐└┘├┤┬┴┼╭╮╰╯]+$/g;
-const DIVIDER_ONLY = /^[\s─━═│┃┌┐└┘├┤┬┴┼╭╮╰╯\-_=~·•*]+$/;
+const BOX_EDGE = /^[\s─━═│┃┌┐└┘├┤┬┴┼╭╮╰╯╹╻╺╸▀▄]+|[\s─━═│┃┌┐└┘├┤┬┴┼╭╮╰╯╹╻╺╸▀▄]+$/g;
+const DIVIDER_ONLY = /^[\s─━═│┃┌┐└┘├┤┬┴┼╭╮╰╯╹╻╺╸▀▄\-_=~·•*]+$/;
 
 const PROMPT_LINE_RE = /^[>❯›»]\s*(.*)$/;
-const HORIZONTAL_DIVIDER_RE = /^[\s─━═\-_=~·•*]+$/;
+const HORIZONTAL_DIVIDER_RE = /^[\s─━═╹╻╺╸▀▄\-_=~·•*]+$/;
 const BOX_BOTTOM_RE = /^\s*[╰└][─━═]*[╯┘]\s*$/;
 const BOX_TOP_RE = /^\s*[╭┌][─━═]*[╮┐]\s*$/;
 const BOX_SIDE_RE = /^\s*[│║](.*?)[│║]?\s*$/;
 const OPENCODE_BAR_RE = /^\s*┃(.*)$/;
 const OPENCODE_COMPOSER_FOOTER_RE =
-  /^(?:(?:Build|Plan|Ask)\s{2,}[A-Za-z0-9._-]+(?:\s+[A-Za-z0-9._-]+){0,3}|(?:tab\s+agents?\b|ctrl\+[a-z]\b|esc\s+to\b).*)$/i;
+  /^(?:(?:Build|Plan|Ask)(?:\s+[a-z0-9_-]+)?\s+·\s+.+|(?:Build|Plan|Ask)\s{2,}[A-Za-z0-9._-]+(?:\s+[A-Za-z0-9._-]+){0,3}|(?:tab\s+agents?\b|ctrl\+[a-z]\b|esc\s+to\b).*)$/i;
 
 // Exact known composer placeholder strings (normalized lowercase) that are NOT unsent user drafts.
 const EXACT_PLACEHOLDERS = new Set([
   "ask codex to do anything",
+  "ask a follow-up question",
   "use /skills to list available skills",
   "summarize recent commits",
   "implement {feature}",
@@ -50,7 +51,8 @@ const FOOTER_CHROME_PATTERNS = [
   /bypass\s+permissions/i,
   /\bctrl\+[a-z]\b.*\b(?:cancel|quit|exit|help|clear|commands|palette)\b/i,
   /^\s*(?:auto-accept|plan mode|accept edits|normal mode|insert mode)\b/i,
-  /^\s*(?:claude|sonnet|opus|haiku|gpt-[0-9]|o[134]|codex|opencode)[\w.\-\s]*\s*[|·•]\s*(?:\d+%|\$[\d.]+|\d+[kKmM]?\s*tokens?)/i,
+  /^\s*(?:tip:\s*)?new\s+task\?\s+\/clear\b/i,
+  /^\s*(?:claude|sonnet|opus|haiku|gpt-[0-9]|o[134]|codex|opencode)[\w.\-\s]*\s*[|·•\/]\s*(?:(?:ctx\s*[:=]\s*)?\d+%|\$[\d.]+|\d+[kKmM]?\s*tokens?)/i,
   /^\s*\d+%\s+(?:context|left|used)\b/i,
   /^\s*esc\s+to\s+(?:interrupt|cancel|close)/i,
   /^\s*enter\s+to\s+(?:send|submit|confirm)/i,
@@ -89,10 +91,10 @@ const QUOTED_INTRO_RE =
 const VALID_BANNER_TAIL_NO_SEP_RE =
   /^(?:(?:please\s+)?(?:try\s+again|retry|wait)|resets?(?:\s|$)|available\b|until\b|in\s+\d+|after\s+\d+|retry[- ]?after\b|at\s+\d)/i;
 const VALID_BANNER_TAIL_WITH_SEP_RE =
-  /^(?:(?:please\s+)?(?:try\s+again|retry|wait)|resets?(?:\s|$)|available\b|until\b|in\s+\d+|after\s+\d+|retry[- ]?after\b|at\s+\d|your\s+(?:usage\s+)?limit\b|rate\s+limit\b|quota\b|too\s+many\s+requests\b|429\b|upgrade\b|learn\s+more\b|https?:\/\/|to\s+get\s+more\s+access\b|contact\s+(?:your\s+)?admin\b|provider\s+throttled\b|throttled\b)/i;
+  /^(?:(?:please\s+)?(?:try\s+again|retry|wait)|resets?(?:\s|$)|available\b|until\b|in\s+\d+|after\s+\d+|retry[- ]?after\b|at\s+\d|your\s+(?:usage\s+)?limit\b|rate\s+limit\b|quota\b|too\s+many\s+requests\b|429\b|visit\s+https?:\/\/|upgrade\b|learn\s+more\b|https?:\/\/|to\s+get\s+more\s+access\b|contact\s+(?:your\s+)?admin\b|provider\s+throttled\b|throttled\b)/i;
 
 // Valid continuation lines immediately below a matched banner (multi-line error boxes).
-const BANNER_CONTINUATION_RE = /^(?:(?:please\s+)?(?:try\s+again|retry(?:\s+after|\s+in|\s+at)?|wait\b)|retry[- ]?after\b|resets?\b|your\s+(?:usage\s+)?limit\b|available\s+(?:again\s+)?(?:in|at)\b|until\s+\d|upgrade\b|learn\s+more\b|https?:\/\/|error\s*[:\-–]|status\s*[:=]\s*429)/i;
+const BANNER_CONTINUATION_RE = /^(?:(?:please\s+)?(?:try\s+again|retry(?:\s+after|\s+in|\s+at)?|wait\b)|retry[- ]?after\b|resets?\b|your\s+(?:usage\s+)?limit\b|available\s+(?:again\s+)?(?:in|at)\b|until\s+\d|\/extra-usage\b|\/upgrade\b|visit\s+https?:\/\/|upgrade\b|learn\s+more\b|https?:\/\/|error\s*[:\-–]|status\s*[:=]\s*429)/i;
 
 // Bottom-region window size (above prompt chrome) inspected for error banners.
 export const BOTTOM_REGION_LINES = 15;
@@ -389,6 +391,7 @@ function parseUtcOffsetMinutes(tzRaw) {
 
 function zonedDateToUtcMs(year, month, day, hour, minute, second, timeZone) {
   // Compute UTC timestamp corresponding to wall clock time in an IANA timeZone using Intl.
+  // Two-pass refinement handles DST transitions where the offset at `guess` differs from `t1`.
   try {
     const guess = Date.UTC(year, month, day, hour, minute, second);
     const fmt = new Intl.DateTimeFormat("en-US", {
@@ -401,17 +404,39 @@ function zonedDateToUtcMs(year, month, day, hour, minute, second, timeZone) {
       second: "2-digit",
       hour12: false,
     });
-    const parts = Object.fromEntries(fmt.formatToParts(new Date(guess)).map((p) => [p.type, p.value]));
-    const asUtc = Date.UTC(
-      Number(parts.year),
-      Number(parts.month) - 1,
-      Number(parts.day),
-      Number(parts.hour) % 24,
-      Number(parts.minute),
-      Number(parts.second),
-    );
-    const offset = asUtc - guess;
-    return guess - offset;
+    const offsetAt = (ms) => {
+      const parts = Object.fromEntries(fmt.formatToParts(new Date(ms)).map((p) => [p.type, p.value]));
+      const asUtc = Date.UTC(
+        Number(parts.year),
+        Number(parts.month) - 1,
+        Number(parts.day),
+        Number(parts.hour) % 24,
+        Number(parts.minute),
+        Number(parts.second),
+      );
+      return asUtc - ms;
+    };
+    const t1 = guess - offsetAt(guess);
+    return guess - offsetAt(t1);
+  } catch {
+    return null;
+  }
+}
+
+function getZonedYmd(ms, timeZone) {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = Object.fromEntries(fmt.formatToParts(new Date(ms)).map((p) => [p.type, p.value]));
+    return {
+      y: Number(parts.year),
+      mo: Number(parts.month) - 1,
+      d: Number(parts.day),
+    };
   } catch {
     return null;
   }
@@ -420,20 +445,27 @@ function zonedDateToUtcMs(year, month, day, hour, minute, second, timeZone) {
 function resolveCalendarTime({ year, month, day, hour, minute, second = 0, tzRaw, nowMs, hasExplicitDate }) {
   const offsetMin = parseUtcOffsetMinutes(tzRaw);
   const nowDate = new Date(nowMs);
+  const ianaTz = offsetMin === null && tzRaw && tzRaw.includes("/") ? tzRaw.trim() : null;
 
   const buildMs = (y, mo, d) => {
     if (offsetMin !== null) {
       return Date.UTC(y, mo, d, hour, minute, second) - offsetMin * 60_000;
     }
-    if (tzRaw && tzRaw.includes("/")) {
-      const zoned = zonedDateToUtcMs(y, mo, d, hour, minute, second, tzRaw.trim());
+    if (ianaTz) {
+      const zoned = zonedDateToUtcMs(y, mo, d, hour, minute, second, ianaTz);
       if (zoned !== null) return zoned;
     }
     return new Date(y, mo, d, hour, minute, second, 0).getTime();
   };
 
   if (hasExplicitDate) {
-    const y = year ?? (offsetMin !== null ? nowDate.getUTCFullYear() : nowDate.getFullYear());
+    const y =
+      year ??
+      (offsetMin !== null
+        ? nowDate.getUTCFullYear()
+        : ianaTz
+          ? (getZonedYmd(nowMs, ianaTz)?.y ?? nowDate.getFullYear())
+          : nowDate.getFullYear());
     let candidate = buildMs(y, month, day);
     // If year was omitted and the date is more than 180 days in the past (e.g. Dec -> Jan), roll next year.
     if (year == null && candidate < nowMs - 180 * 86_400_000) {
@@ -442,7 +474,7 @@ function resolveCalendarTime({ year, month, day, hour, minute, second = 0, tzRaw
     return candidate;
   }
 
-  // Time-of-day only: construct in target timezone's "today", rolling +1 day if already passed.
+  // Time-of-day only: construct in target timezone's "today", rolling calendar days so DST transitions do not skew by 1h.
   let y;
   let mo;
   let d;
@@ -451,14 +483,32 @@ function resolveCalendarTime({ year, month, day, hour, minute, second = 0, tzRaw
     y = shifted.getUTCFullYear();
     mo = shifted.getUTCMonth();
     d = shifted.getUTCDate();
+  } else if (ianaTz) {
+    const zonedYmd = getZonedYmd(nowMs, ianaTz);
+    if (zonedYmd) {
+      ({ y, mo, d } = zonedYmd);
+    } else {
+      y = nowDate.getFullYear();
+      mo = nowDate.getMonth();
+      d = nowDate.getDate();
+    }
   } else {
     y = nowDate.getFullYear();
     mo = nowDate.getMonth();
     d = nowDate.getDate();
   }
+  let dayDelta = 0;
   let candidate = buildMs(y, mo, d);
-  while (candidate - nowMs > 86_400_000) candidate -= 86_400_000;
-  while (candidate <= nowMs) candidate += 86_400_000;
+  while (candidate - nowMs > 86_400_000 && dayDelta > -2) {
+    dayDelta -= 1;
+    const prev = buildMs(y, mo, d + dayDelta);
+    if (prev <= nowMs) break;
+    candidate = prev;
+  }
+  while (candidate <= nowMs && dayDelta < 3) {
+    dayDelta += 1;
+    candidate = buildMs(y, mo, d + dayDelta);
+  }
   return candidate;
 }
 

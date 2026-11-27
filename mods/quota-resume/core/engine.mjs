@@ -411,8 +411,20 @@ export function terminalStatusWord(terminal) {
   return null;
 }
 
+export function terminalStatusMsg(terminal) {
+  if (!terminal || typeof terminal !== "object") return null;
+  const statusMsg =
+    terminal.status && typeof terminal.status === "object" && typeof terminal.status.msg === "string"
+      ? terminal.status.msg.trim()
+      : "";
+  if (statusMsg) return statusMsg;
+  const reportMsg = typeof terminal.report?.msg === "string" ? terminal.report.msg.trim() : "";
+  return reportMsg || null;
+}
+
 export function isCandidateTerminal(terminal) {
   if (!terminal || terminal.state !== "live") return false;
+  if (machineOf(terminal.address) !== null) return false;
   if (!terminal.program?.agent || terminal.program?.shell) return false;
   const status = terminalStatusWord(terminal);
   if (!IDLE_STATES.has(status)) return false;
@@ -1408,7 +1420,7 @@ export function createEngine(env) {
       agent,
       address: terminal.address,
       text: sRes.text,
-      reportMsg: terminal.report?.msg ?? null,
+      reportMsg: terminalStatusMsg(terminal),
       nowMs,
     });
     if (!detected) {
@@ -1567,6 +1579,7 @@ export function createEngine(env) {
       drainPendingSyncCommand();
       syncFromShared(now());
       if (closed || !state.enabled) return;
+      if (machineOf(t.address) !== null) continue;
 
       const sig = inspectionSignature(t);
       const usageScopedSig = `${sig}|usage:${usageSig}`;
@@ -1824,7 +1837,13 @@ export function createEngine(env) {
     if (closed) return { sent: false, outcome: "cancelled" };
     const atMs = now();
 
-    // 0. Fast synchronous eligibility, expiry, reset-time, attempt-cap, and cooldown guards.
+    // 0. Fast synchronous own-machine, eligibility, expiry, reset-time, attempt-cap, and cooldown guards.
+    if (entry.machine !== null || machineOf(entry.address) !== null) {
+      recordOutcome(entry, "skipped-session", "Remote terminal is managed by its own machine", atMs, {
+        remember: false,
+      });
+      return { sent: false, outcome: "skipped-session" };
+    }
     if (!state.enabled || !state.settings.agents[entry.agent] || !state.queue.includes(entry)) {
       return { sent: false, outcome: "cancelled" };
     }
@@ -1954,14 +1973,28 @@ export function createEngine(env) {
       }
     }
 
+    // 3. Drain sync commands and sync shared state after transcript check.
     drainPendingSyncCommand();
     syncFromShared(now());
     if (closed || !state.enabled || !state.settings.agents[entry.agent] || !state.queue.includes(entry)) {
       return { sent: false, outcome: "cancelled" };
     }
 
-    // 2b. Visible screen re-check (`hc read <addr> --lines 0`): unsent draft check (all agents)
-    //     and active banner confirmation (ALL non-transcript-verified entries, including Codex/OpenCode/restored).
+    // 4. Final `hc get <addr> --json` right before final screen/draft verification (catches state changes during transcript I/O).
+    const finalGet = await fetchFreshTerminal(entry.address, afterFn);
+    if (closed) return { sent: false, outcome: "cancelled" };
+    if (!finalGet.ok) {
+      return handleTransientGetFailure(entry, now());
+    }
+    entry.getFailures = 0;
+    const finalValid = validateFreshTerminal(finalGet.terminal, entry, now());
+    if (!finalValid.ok) {
+      return { sent: false, outcome: finalValid.outcome };
+    }
+
+    // 5. Visible screen re-check (`hc read <addr> --lines 0`) LAST right before exclusive claim & send:
+    //    unsent draft check (all agents) and active banner confirmation (ALL non-transcript-verified entries,
+    //    using `terminalStatusMsg(finalGet.terminal)` for status/report msg).
     const sRes = await readTerminalScreen(entry.address, afterFn);
     if (closed) return { sent: false, outcome: "cancelled" };
     if (!sRes.ok) {
@@ -1981,21 +2014,19 @@ export function createEngine(env) {
       return { sent: false, outcome: "skipped-replied" };
     }
 
-    let matchedViaReportMsg = false;
     if (!isTranscriptVerified) {
       const screenNowMs = now();
       const stillActive = detectScreenRateLimit({
         agent: entry.agent,
         address: entry.address,
         text: sRes.text,
-        reportMsg: preGet.terminal?.report?.msg ?? null,
+        reportMsg: terminalStatusMsg(finalGet.terminal),
         nowMs: screenNowMs,
       });
       if (!stillActive) {
         recordOutcome(entry, "skipped-replied", "Rate-limit banner no longer active on screen", screenNowMs);
         return { sent: false, outcome: "skipped-replied" };
       }
-      matchedViaReportMsg = stillActive.fingerprint.startsWith("report:");
 
       const bannerChanged =
         stillActive.fingerprint !== entry.errorFingerprint ||
@@ -2055,41 +2086,13 @@ export function createEngine(env) {
       }
     }
 
+    // 6. Sync command drain + shared sync + eligibility check -> atomic exclusive claim -> `hc send`.
     drainPendingSyncCommand();
     syncFromShared(now());
     if (closed || !state.enabled || !state.settings.agents[entry.agent] || !state.queue.includes(entry)) {
       return { sent: false, outcome: "cancelled" };
     }
 
-    // 3. Final `hc get <addr> --json` LAST right before sending (catches state changes during slow I/O).
-    const finalGet = await fetchFreshTerminal(entry.address, afterFn);
-    if (closed) return { sent: false, outcome: "cancelled" };
-    if (!finalGet.ok) {
-      return handleTransientGetFailure(entry, now());
-    }
-    entry.getFailures = 0;
-    const finalValid = validateFreshTerminal(finalGet.terminal, entry, now());
-    if (!finalValid.ok) {
-      return { sent: false, outcome: finalValid.outcome };
-    }
-
-    // If the banner was matched only via preliminary `report.msg`, confirm it is still active in `finalGet.terminal.report.msg`.
-    if (!isTranscriptVerified && matchedViaReportMsg) {
-      const finalNowMs = now();
-      const finalStillActive = detectScreenRateLimit({
-        agent: entry.agent,
-        address: entry.address,
-        text: sRes.text,
-        reportMsg: finalGet.terminal?.report?.msg ?? null,
-        nowMs: finalNowMs,
-      });
-      if (!finalStillActive) {
-        recordOutcome(entry, "skipped-replied", "Rate-limit banner no longer active on screen", finalNowMs);
-        return { sent: false, outcome: "skipped-replied" };
-      }
-    }
-
-    // 4. Synchronous atomic exclusive claim across instances + publish "resuming" BEFORE `hc send`!
     if (!acquireExclusiveClaim(entry, episodeKey, now())) {
       const idx = state.queue.indexOf(entry);
       if (idx !== -1 && state.claims[claimKey]?.owner && state.claims[claimKey].owner !== instanceId) {
@@ -2098,9 +2101,11 @@ export function createEngine(env) {
       return { sent: false, outcome: "cancelled" };
     }
 
-    // Use atomic `--if idle` when terminal reports `idle`. For `done`/`error` terminals
-    // (`hc send --if` only accepts `idle|working`), fire immediately after `finalGet` without `--force`
-    // so `blocked` terminals are still atomically refused by herdr-core.
+    // `hc send --if` in herdr-core currently accepts only `idle|working`.
+    // Adding `hc send --if done` in herdr-core would close the window where a `done`/`error`
+    // terminal transitions to `working` while herdr-core holds delivery.
+    // Until then, `done`/`error` sends rely on pre-send `hc get` + screen draft checks without `--force`
+    // (so herdr-core still refuses `blocked` terminals).
     const sendArgs =
       finalValid.status === "idle"
         ? ["send", "--if", "idle", entry.address, DEFAULT_PROMPT]

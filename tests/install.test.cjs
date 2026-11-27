@@ -186,6 +186,17 @@ test("a deleted owned layout is not reinstalled until copied back", (t) => {
   assert.match(run(f, ["--apply"]).out, /ok\s+layouts\/glass\.json/);
 });
 
+test("an unreadable layouts path is a failure, not a deletion", (t) => {
+  const f = build(t);
+  run(f, ["--apply"]);
+  fs.rmSync(path.join(f.app, "layouts"), { recursive: true });
+  write(path.join(f.app, "layouts"), "not a folder\n");
+  const r = run(f, ["--apply"]);
+  assert.equal(r.status, 1);
+  assert.doesNotMatch(r.out, /removed\s+layouts\//);
+  assert.match(r.out, /failed\s+layouts\/glass\.json/);
+});
+
 test("unedited owned mod is updated, new files added, dropped files removed", (t) => {
   const f = build(t);
   write(path.join(f.pack, "mods", "alpha", "old.js"), "old\n");

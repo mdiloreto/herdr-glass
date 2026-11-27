@@ -131,7 +131,7 @@ herdr-app do layout.switch --name glass
 
 On macOS, if `herdr-app` is not on your PATH, use `/Applications/Herdr.app/Contents/MacOS/Herdr`.
 
-`--apply` installs the mods, layouts and themes, builds the pull request helper from source it fetches from `munza/herdr-mods` on GitHub at a pinned commit, and adds keybindings to `keys.json`: a `ctrl-space` prefix (press it twice to send it to the terminal) and a few others. It only adds bindings, keeps yours where they clash, and backs the file up first. It never installs programs, and never overwrites a mod, layout or theme that it did not install or that you edited. A layout it installed and you deleted stays deleted on later runs; copy it back from the checkout's `layouts/` to get it again. It lists what is missing or skipped and exits with status 1 while anything is.
+`--apply` installs the mods, layouts and themes, builds the pull request helper from source it fetches from `munza/herdr-mods` on GitHub at a pinned commit, and adds keybindings to `keys.json`: a `ctrl-space` prefix (press it twice to send it to the terminal) and a few others. It only adds bindings, keeps yours where they clash, and backs the file up first. It never installs programs, and never overwrites a mod, layout or theme that it did not install or that you edited. A layout file it installed and you deleted stays deleted on later runs and does not count as missing; copy it back from the checkout's `layouts/` to get it again. It lists what is missing or skipped and exits with status 1 while anything is.
 
 | Option | Effect |
 | --- | --- |

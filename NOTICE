@@ -84,10 +84,10 @@ Mods: space-folders, space-folders-next. Both derive from its shipped `spaces`
 mod (defaults/mods/spaces). The upstream LICENSE, README and about.toml state
 no copyright holder.
 
-Parts of the mods goto, tui-goto and tui-spaces come from its shipped sources,
-compared at v0.1.16. The rest of those mods is under this repository's MIT
-License, except as listed here and under JinJieBeWater/herdr-t3 and Lucide
-below. PROVENANCE.md gives the line ranges.
+Parts of the mods goto, tui-goto, tui-prefix and tui-spaces come from its
+shipped sources, compared at v0.1.16. The rest of those mods is under this
+repository's MIT License, except as listed here and under
+JinJieBeWater/herdr-t3 and Lucide below. PROVENANCE.md gives the line ranges.
 
   mods/goto/score.js: the fuzzy() function from defaults/frame/palette/main.js,
   with `export` added.
@@ -98,6 +98,9 @@ below. PROVENANCE.md gives the line ranges.
 
   mods/tui-goto/main.js and mods/tui-spaces/main.js: blocks from
   defaults/mods/picker/main.js, modified by mdiloreto.
+
+  mods/tui-prefix/main.js: the status rank and a sub-agent's status (from
+  defaults/mods/agents/main.js), modified by mdiloreto.
 
 --------------------------------------------------------------------------
 JinJieBeWater/herdr-t3, Apache License 2.0

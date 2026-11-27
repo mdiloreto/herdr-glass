@@ -4,7 +4,7 @@ Licenses and attribution: [`LICENSE`](./LICENSE), [`NOTICE`](./NOTICE), [`LICENS
 
 ## Original mods (MIT)
 
-Parts of `goto`, `tui-goto` and `tui-spaces` come from third parties and keep their license: see [Third-party code in these mods](#third-party-code-in-these-mods).
+Parts of `goto`, `tui-goto`, `tui-prefix` and `tui-spaces` come from third parties and keep their license: see [Third-party code in these mods](#third-party-code-in-these-mods).
 
 | Mod | What it does |
 | --- | --- |
@@ -45,7 +45,8 @@ All Apache-2.0. Line ranges are those of this repository's files and of the upst
 | `mods/tui-goto/main.js` 1234-1242 | same file, 227-235 | Popup frame |
 | `mods/tui-goto/main.js` 1494-1528 | same file, 252-254 | Search box |
 | `mods/tui-goto/main.js` 1562-1600 | same file, 258-274 | List and wheel scrolling |
-| `mods/tui-spaces/main.js` 25-59 | same file, 11-35 | Space colors |
+| `mods/tui-prefix/main.js` 46, 48-51 | `herdr-app:defaults/mods/agents/main.js` 52, 55-58 | Status rank and a sub-agent's status |
+| `mods/tui-spaces/main.js` 25-59 | `herdr-app:defaults/mods/picker/main.js` 11-35 | Space colors |
 | `mods/tui-spaces/main.js` 86-112 | same file, 41-61 | Filter input and machine list |
 | `mods/tui-spaces/main.js` 302-324 | same file, 141-154 | Keeping the selection in view |
 | `mods/tui-spaces/main.js` 360-399 | same file, 187-219 | Row layout |

@@ -1,3 +1,5 @@
+// Includes code from herdrdev/herdr-app@034f8b85f7e6bb71f8ff55cb4a80c548b2578c0f, defaults/mods/agents/main.js.
+// Licensed under Apache-2.0; modified. Line ranges: PROVENANCE.md.
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import {

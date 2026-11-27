@@ -886,13 +886,13 @@ test("desktop notifications go to the viewer's own system", async () => {
 });
 
 test("only the notify-send body is escaped as markup", async () => {
-  const mount = "/mnt/<a & b>";
+  const mount = "/mnt/<a & \\074b>";
   const host = linuxOutput({
     df: [`/dev/sda1 1000000 950000 50000 95% ${mount}`],
     mount: [`/dev/sda1 on ${mount} type ext4 (rw)`],
   });
   for (const [local, expected] of [
-    [linuxOutput(), "0.0 GB free on /mnt/&lt;a &amp; b&gt;"],
+    [linuxOutput(), "0.0 GB free on /mnt/&lt;a &amp; \\\\074b&gt;"],
     [macOutput(), `0.0 GB free on ${mount}`],
   ]) {
     const r = await rig({ machines: [remote("box")] });

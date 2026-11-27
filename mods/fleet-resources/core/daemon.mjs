@@ -72,8 +72,8 @@ export function createDaemon({ machines, exec, notify, shared, setShared, now, l
     const options = { timeout: TIMEOUT_MS };
     let result;
     if (viewerOs === "Linux") {
-      // Many notification daemons read the body as markup.
-      const text = body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      // notify-send decodes backslash escapes, and many daemons read the body as markup.
+      const text = body.replace(/\\/g, "\\\\").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       result = await exec("notify-send", ["-a", "Herdr", "--", title, text], options);
     } else if (viewerOs === "Darwin") {
       result = await exec("osascript", [

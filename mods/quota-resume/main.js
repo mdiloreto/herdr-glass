@@ -1,5 +1,5 @@
 // Zero-size daemon mod that detects rate-limited Claude Code, Codex, and OpenCode
-// sessions (local and fleet) and resumes them automatically once their quota resets.
+// sessions on this machine and resumes them automatically once their quota resets.
 import { View, div } from "gpui-kit";
 import {
   terminals,

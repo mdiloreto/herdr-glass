@@ -202,6 +202,20 @@ test("network filesystems are left out", async () => {
   assert.deepEqual(parseDisks(df, types.map((t) => `host:/${t} on /mnt/${t} (${t}, nodev)`), "Darwin"), []);
 });
 
+test("keeps one APFS disk beside a network mount, and whole process names", async () => {
+  const { parseSample, parseProcesses } = await core("sample.mjs");
+  const mount = [
+    ...MAC_MOUNT.map((line) => line.replace("nobrowse, protect)", "nobrowse, protect, root data)")),
+    "Example:/Share on /Users/me/Share (nfs, nodev, nosuid, noatime, mounted by me)",
+  ];
+  const df = [...MAC_DF, "Example:/Share   500000000 100000000 400000000    20%    /Users/me/Share"];
+  const { disks } = parseSample(macOutput({ df, mount }));
+  assert.deepEqual(disks.map((d) => d.mount), ["/System/Volumes/Data"]);
+  const ps = " 74.0 builder\n 45.7 WindowServer\n 28.3 Example Browser Helper (Renderer)\n 25.9 Other\n";
+  assert.deepEqual(parseProcesses("Darwin", ps).map((p) => p.name),
+    ["builder", "WindowServer", "Example Browser Helper (Renderer)"]);
+});
+
 test("rejects incomplete output and leaves unreadable metrics unknown", async () => {
   const { parseSample } = await core("sample.mjs");
   assert.equal(parseSample(linuxOutput().replace("@end", "")), null);

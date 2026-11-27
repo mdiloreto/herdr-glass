@@ -265,7 +265,7 @@
                     "height": 30,
                     "position": "top"
                   },
-                  "background": "background",
+                  "background": "#07091030",
                   "border": {
                     "width": 1,
                     "color": "border"
@@ -346,6 +346,8 @@
               },
               "min": 280,
               "max": 900,
+              "background": "#07091030",
+              "radius": 10,
               "hidden": true
             }
           ],
@@ -425,8 +427,8 @@
   ],
   "background": {
     "gradient": [
-      "#2b3550b3",
-      "#3a2b45b3"
+      "#13182696",
+      "#1c142896"
     ],
     "angle": 135
   },
@@ -444,13 +446,15 @@
     16
   ],
   "window_blur": true,
+  "theme": "graphite",
   "colors": {
     "canvas": "#00000000",
-    "chrome": "#ffffff0f",
-    "background": "#0a0c148c",
-    "border": "#ffffff1f",
+    "chrome": "#090c1412",
+    "background": "#0a0c1400",
+    "raised": "#252d4640",
+    "border": "#ffffff22",
     "accent": "#9ad0ff",
-    "popover": "#231e30"
+    "popover": "#1d1a2b"
   },
   "terminal_opacity": 0,
   "floating": [

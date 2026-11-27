@@ -1,3 +1,5 @@
+// Includes code from herdrdev/herdr-app@034f8b85f7e6bb71f8ff55cb4a80c548b2578c0f, defaults/mods/picker/main.js.
+// Licensed under Apache-2.0; modified. Line ranges: PROVENANCE.md.
 // Herdr TUI Workspace Picker (prefix + w):
 // Lists ALL spaces immediately (never hiding quiet spaces behind "earlier"),
 // with active indicator, colored space badge, branch/folder, tab & agent counts.

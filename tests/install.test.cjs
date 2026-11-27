@@ -171,6 +171,21 @@ test("local edit survives a pack update and is reported", (t) => {
   assert.equal(read(f.app, "mods/alpha/main.js"), "// mine\n");
 });
 
+test("a deleted owned layout is not reinstalled until copied back", (t) => {
+  const f = build(t);
+  run(f, ["--apply"]);
+  stampHelper(f);
+  fs.rmSync(path.join(f.app, "layouts", "glass.json"));
+  const r = run(f, ["--apply"]);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /removed\s+layouts\/glass\.json: deleted locally, left out/);
+  assert.equal(fs.existsSync(path.join(f.app, "layouts", "glass.json")), false);
+  assert.ok(fs.existsSync(path.join(f.app, "layouts", "glass.svg")));
+
+  fs.copyFileSync(path.join(f.pack, "layouts", "glass.json"), path.join(f.app, "layouts", "glass.json"));
+  assert.match(run(f, ["--apply"]).out, /ok\s+layouts\/glass\.json/);
+});
+
 test("unedited owned mod is updated, new files added, dropped files removed", (t) => {
   const f = build(t);
   write(path.join(f.pack, "mods", "alpha", "old.js"), "old\n");

@@ -139,19 +139,49 @@ export function findActiveQuotaError(entries, nowMs = Date.now(), { maxAgeMs = M
  * Verifies that `errorUuid` exists in the transcript tail as a genuine quota API error
  * (`isApiErrorMessage === true` and `extractResetMs(e) != null`) with no subsequent
  * non-error assistant reply.
+ * Returns `{ ok, resetsAtMs, newerError }` where `resetsAtMs` is the live reset time
+ * of `errorUuid` and `newerError` is the latest subsequent quota error on the same turn (if any).
  */
 export function verifyActiveTranscriptError(entries, errorUuid) {
-  if (!Array.isArray(entries) || entries.length === 0) return false;
-  if (typeof errorUuid !== "string" || !errorUuid.trim()) return false;
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return { ok: false, resetsAtMs: null, newerError: null };
+  }
+  if (typeof errorUuid !== "string" || !errorUuid.trim()) {
+    return { ok: false, resetsAtMs: null, newerError: null };
+  }
   const idx = entries.findIndex((e) => e && e.uuid === errorUuid);
-  if (idx === -1) return false;
+  if (idx === -1) {
+    return { ok: false, resetsAtMs: null, newerError: null };
+  }
   const errEntry = entries[idx];
-  if (!errEntry.isApiErrorMessage || extractResetMs(errEntry) == null) return false;
+  const resetsAtMs = errEntry.isApiErrorMessage ? extractResetMs(errEntry) : null;
+  if (!errEntry.isApiErrorMessage || resetsAtMs == null) {
+    return { ok: false, resetsAtMs: null, newerError: null };
+  }
+  let newerError = null;
   for (let i = idx + 1; i < entries.length; i++) {
     const e = entries[i];
-    if (e && e.type === "assistant" && !e.isApiErrorMessage) return false;
+    if (!e || typeof e !== "object") continue;
+    if (e.type === "assistant" && !e.isApiErrorMessage) {
+      return { ok: false, resetsAtMs: null, newerError: null };
+    }
+    if (e.isApiErrorMessage) {
+      const nextReset = extractResetMs(e);
+      if (nextReset != null) {
+        const rawUuid = typeof e.uuid === "string" && e.uuid.trim() ? e.uuid.trim() : null;
+        const ts = toEpochMs(e.timestamp);
+        const uuid = rawUuid ?? `transcript:${stableHash(`${ts ?? ""}:${nextReset}`)}`;
+        newerError = {
+          uuid,
+          transcriptUuid: rawUuid,
+          resetsAtMs: nextReset,
+          timestampMs: ts,
+          reason: extractTranscriptReason(e),
+        };
+      }
+    }
   }
-  return true;
+  return { ok: true, resetsAtMs, newerError };
 }
 
 /**

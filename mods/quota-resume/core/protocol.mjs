@@ -10,13 +10,13 @@ export const HISTORY_LIMIT = 50;
 export const DEFAULT_DELAY_SEC = 60;
 export const MAX_DELAY_SEC = 3600;
 export const DEFAULT_PROMPT = "The usage limit has reset. Continue from where you left off.";
-export const MAX_HANDLED_FINGERPRINTS = 200;
-export const MAX_HANDLED_BANNERS = 200;
-export const MAX_PROMOTED_EPISODES = 200;
-export const MAX_EPISODE_ATTEMPTS_KEYS = 200;
-export const MAX_TERMINAL_COOLDOWNS = 100;
-export const MAX_CANCEL_EPOCHS = 100;
-export const MAX_CLAIMS = 100;
+export const MAX_HANDLED_FINGERPRINTS = 64;
+export const MAX_HANDLED_BANNERS = 64;
+export const MAX_PROMOTED_EPISODES = 64;
+export const MAX_EPISODE_ATTEMPTS_KEYS = 64;
+export const MAX_TERMINAL_COOLDOWNS = 64;
+export const MAX_CANCEL_EPOCHS = 64;
+export const MAX_CLAIMS = 32;
 export const CLAIM_TTL_MS = 5 * 60 * 1000; // 5 minutes
 export const MAX_STALE_SEND_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours past resetsAtMs
 export const MAX_QUEUE_HARD_AGE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days sanity cap
@@ -97,7 +97,11 @@ export function isEntryExpired(entry, nowMs = Date.now()) {
   return false;
 }
 
-export function normalizeQueueEntry(raw, nowMs = Date.now()) {
+export function normalizeQueueEntry(
+  raw,
+  nowMs = Date.now(),
+  { delaySec = DEFAULT_DELAY_SEC, promotedSet = null } = {},
+) {
   if (!raw || typeof raw !== "object") return null;
   if (typeof raw.address !== "string" || !raw.address) return null;
   if (!SUPPORTED_AGENTS.includes(raw.agent)) return null;
@@ -125,6 +129,20 @@ export function normalizeQueueEntry(raw, nowMs = Date.now()) {
   if (resetSource === "transcript" && !transcriptUuid) {
     resetSource = "screen";
   }
+  const sawExhausted = Boolean(raw.sawExhausted);
+  const exhaustedObservedAtMs =
+    typeof raw.exhaustedObservedAtMs === "number" && Number.isFinite(raw.exhaustedObservedAtMs)
+      ? raw.exhaustedObservedAtMs
+      : null;
+  const promoKey = `${raw.address}:${Math.floor(raw.resetsAtMs / 60_000)}`;
+  const earlyPromoted = Boolean(
+    raw.earlyPromoted &&
+      sawExhausted &&
+      exhaustedObservedAtMs != null &&
+      (!promotedSet || promotedSet.has(promoKey)),
+  );
+  const minResumeAtMs = raw.resetsAtMs + delaySec * 1000;
+  const resumeAtMs = earlyPromoted ? raw.resumeAtMs : Math.max(raw.resumeAtMs, minResumeAtMs);
   return {
     address: raw.address,
     machine: typeof raw.machine === "string" && raw.machine ? raw.machine : machineOf(raw.address),
@@ -136,10 +154,15 @@ export function normalizeQueueEntry(raw, nowMs = Date.now()) {
     where: typeof raw.where === "string" && raw.where ? raw.where : null,
     detectedAtMs,
     resetsAtMs: raw.resetsAtMs,
-    resumeAtMs: raw.resumeAtMs,
+    resumeAtMs,
     resetSource,
     reason: typeof raw.reason === "string" && raw.reason ? raw.reason : "rate limit",
     errorTurn: typeof raw.errorTurn === "number" && Number.isFinite(raw.errorTurn) ? raw.errorTurn : null,
+    errorStatusMs:
+      typeof raw.errorStatusMs === "number" && Number.isFinite(raw.errorStatusMs)
+        ? raw.errorStatusMs
+        : null,
+    isAbsoluteTimeOfDay: Boolean(raw.isAbsoluteTimeOfDay),
     errorFingerprint: raw.errorFingerprint,
     episodeKey: typeof raw.episodeKey === "string" && raw.episodeKey ? raw.episodeKey : null,
     matchedLine: typeof raw.matchedLine === "string" && raw.matchedLine ? raw.matchedLine : null,
@@ -164,7 +187,9 @@ export function normalizeQueueEntry(raw, nowMs = Date.now()) {
       raw.screenFailures >= 0
         ? Math.min(Math.floor(raw.screenFailures), 100)
         : 0,
-    sawExhausted: Boolean(raw.sawExhausted),
+    sawExhausted,
+    exhaustedObservedAtMs,
+    earlyPromoted,
     lastCheckMs:
       typeof raw.lastCheckMs === "number" && Number.isFinite(raw.lastCheckMs)
         ? raw.lastCheckMs
@@ -237,6 +262,7 @@ function normalizeHandledBanners(raw, limit) {
       {
         bannerKey: v.bannerKey,
         turn: typeof v.turn === "number" && Number.isFinite(v.turn) ? v.turn : null,
+        statusMs: typeof v.statusMs === "number" && Number.isFinite(v.statusMs) ? v.statusMs : null,
         resetsAtMs:
           typeof v.resetsAtMs === "number" && Number.isFinite(v.resetsAtMs) ? v.resetsAtMs : null,
         handledAtMs: v.handledAtMs,
@@ -284,8 +310,13 @@ export function defaultState(nowMs = Date.now()) {
 
 export function normalizeState(raw, nowMs = Date.now()) {
   if (!raw || typeof raw !== "object") return defaultState(nowMs);
+  const settings = normalizeSettings(raw.settings);
+  const promotedEpisodes = normalizeStringSetList(raw.promotedEpisodes, MAX_PROMOTED_EPISODES);
+  const promotedSet = new Set(promotedEpisodes);
   const queue = Array.isArray(raw.queue)
-    ? raw.queue.map((e) => normalizeQueueEntry(e, nowMs)).filter(Boolean)
+    ? raw.queue
+        .map((e) => normalizeQueueEntry(e, nowMs, { delaySec: settings.delaySec, promotedSet }))
+        .filter(Boolean)
     : [];
   const history = Array.isArray(raw.history)
     ? raw.history.map(normalizeHistoryEntry).filter(Boolean).slice(0, HISTORY_LIMIT)
@@ -301,15 +332,15 @@ export function normalizeState(raw, nowMs = Date.now()) {
       typeof raw.lastHandledCommandId === "string" && raw.lastHandledCommandId
         ? raw.lastHandledCommandId
         : null,
-    settings: normalizeSettings(raw.settings),
+    settings,
     queue,
     history,
     handledFingerprints: normalizeStringSetList(raw.handledFingerprints, MAX_HANDLED_FINGERPRINTS),
     handledBanners: normalizeHandledBanners(raw.handledBanners, MAX_HANDLED_BANNERS),
-    promotedEpisodes: normalizeStringSetList(raw.promotedEpisodes, MAX_PROMOTED_EPISODES),
+    promotedEpisodes,
     episodeAttempts: normalizeNumberMap(raw.episodeAttempts, MAX_EPISODE_ATTEMPTS_KEYS),
     terminalCooldowns: normalizeNumberMap(raw.terminalCooldowns, MAX_TERMINAL_COOLDOWNS, {
-      minValue: Math.max(0, nowMs - 60 * 60 * 1000),
+      minValue: Math.max(0, nowMs - 10 * 60 * 1000),
     }),
     cancelEpochs: normalizeNumberMap(raw.cancelEpochs, MAX_CANCEL_EPOCHS),
     cancelledSignatures: normalizeStringMap(raw.cancelledSignatures, MAX_CANCEL_EPOCHS),

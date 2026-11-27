@@ -6,7 +6,7 @@
     "git": {
       "why": "Branch, worktree and change views in most panels.",
       "required": true,
-      "mods": ["agents-list", "better-changes", "better-files", "better-sidebar-rail", "branch-pr", "ci-dash", "cockpit", "goto", "icons", "markdown-browser", "preview-plus", "rail-next", "space-folders", "space-folders-next", "t3-agents", "t3-inbox", "t3-menu", "t3-new-menu", "t3-picker", "t3-spaces", "usage-limits", "worktrees"],
+      "mods": ["agents-list", "better-changes", "better-files", "better-sidebar-rail", "branch-pr", "ci-dash", "cockpit", "goto", "icons", "markdown-browser", "preview-plus", "rail-next", "space-folders", "space-folders-next", "t3-agents", "t3-inbox", "t3-menu", "t3-new-menu", "t3-picker", "t3-spaces", "usage-limits", "usage-limits-fleet-canary", "worktrees"],
       "install": { "brew": "git", "pacman": "git", "apt": "git", "dnf": "git" }
     },
     "gh": {
@@ -31,7 +31,7 @@
     "hc": {
       "why": "Terminal details for the usage-limits bar.",
       "required": true,
-      "mods": ["usage-limits"],
+      "mods": ["usage-limits", "usage-limits-fleet-canary"],
       "install": { "hint": "Ships with Herdr App as herdr-core; reinstall or update Herdr App if hc is not on PATH." }
     },
     "terminal-browser": {

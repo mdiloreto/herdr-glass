@@ -100,7 +100,8 @@
     "commit": "ffb1773060e28bc2efbe897d07d5ae7c0c4d0ddf",
     "license": "MIT",
     "paths": {
-      "mods/insights": "mods/insights"
+      "mods/insights": "mods/insights",
+      "mods/usage-limits-fleet-canary": "mods/usage-limits-fleet-canary"
     }
   }
 ]

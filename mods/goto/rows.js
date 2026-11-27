@@ -1,3 +1,6 @@
+// Includes code from JinJieBeWater/herdr-t3@17bbad1f7206ce4c5fb165059976887fde6a0fbc, mods/t3-picker/main.js,
+// and herdrdev/herdr-app@034f8b85f7e6bb71f8ff55cb4a80c548b2578c0f, defaults/frame/palette/main.js and defaults/mods/agents/main.js.
+// Licensed under Apache-2.0; modified. Line ranges: PROVENANCE.md.
 // What goto draws: a row, its marks, and the preview. Looks match better-sidebar-rail's agents list and
 // space-folders' avatars, so a thing reads the same wherever it shows.
 import { div, svg, image } from "gpui-kit";

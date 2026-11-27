@@ -1,3 +1,5 @@
+// fuzzy() comes from herdrdev/herdr-app@034f8b85f7e6bb71f8ff55cb4a80c548b2578c0f, defaults/frame/palette/main.js.
+// Licensed under Apache-2.0; modified (only that function is taken, with `export` added). Line ranges: PROVENANCE.md.
 // Pure search core of goto: no herdr imports, so it runs under plain node (test/score.test.mjs).
 // The fuzzy scorer is the command palette's (frame/palette/main.js): the query's letters in order,
 // word starts and runs rank higher. Each item offers several fields; a field's score is scaled by its

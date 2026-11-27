@@ -1,3 +1,5 @@
+// Adapted from JinJieBeWater/herdr-t3@17bbad1f7206ce4c5fb165059976887fde6a0fbc, mods/t3-picker/zoom.js.
+// Licensed under Apache-2.0; modified. Line ranges: PROVENANCE.md.
 import { panes, run } from "herdr";
 
 // As t3-picker: a tab draws its zoomed pane whichever pane is focused, so a zoomed sibling is unzoomed first,

@@ -1,3 +1,5 @@
+// Includes code from JinJieBeWater/herdr-t3@17bbad1f7206ce4c5fb165059976887fde6a0fbc, mods/t3-picker/main.js.
+// Licensed under Apache-2.0; modified. Line ranges: PROVENANCE.md.
 // Go to anything: one overlay to jump to any agent, pane, tab or space. t3-picker's quick pane list and
 // tui-goto's preview and actions in one, ranked by the command palette's fuzzy scorer (score.js).
 // Empty: the pane you came from, then agents needing you, then the ones you visited last, grouped.

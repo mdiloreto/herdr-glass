@@ -1,3 +1,5 @@
+// Copied from JinJieBeWater/herdr-t3@17bbad1f7206ce4c5fb165059976887fde6a0fbc, mods/t3-picker/name.js.
+// Licensed under Apache-2.0; modified. Line ranges: PROVENANCE.md.
 // What a pane is called, as t3-picker's namer (copy), except that an agent's own session name, the label its
 // statusline puts on the terminal (claude.title, as agent-names reads it), comes first.
 import { terminals, spaces, shared } from "herdr";

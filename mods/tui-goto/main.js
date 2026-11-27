@@ -1,3 +1,5 @@
+// Includes code from herdrdev/herdr-app@034f8b85f7e6bb71f8ff55cb4a80c548b2578c0f, defaults/mods/picker/main.js.
+// Licensed under Apache-2.0; modified. Line ranges: PROVENANCE.md.
 // Ultimate Herdr Session Navigator (Ctrl+Space g / Ctrl+Shift+K):
 // Combines the best features from across the Herdr community:
 // 1. Herdr TUI OpenNavigator: Spaces ▾/▸ -> Tabs ├──/└── -> Panes/Agents tree, j/k, Space expand, a/b/w/i/d filters, / search

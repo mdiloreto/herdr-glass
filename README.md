@@ -14,6 +14,8 @@ Group spaces into colored folders. Below them, agents are sorted into Needs you,
 
 <img src="docs/images/sidebar.webp" alt="Sidebar with space folders and grouped agents, next to the Inbox view" width="556">
 
+The agents list and the Inbox are two views of one sidebar, shown side by side here.
+
 ### Changes
 
 Stage, commit and amend, browse commit history, and open diffs inline or side by side. It does not fetch, pull, push or discard.
@@ -44,6 +46,8 @@ For GitHub, through `gh`. Read a pull request's description, comments and checks
 
 <img src="docs/images/github.webp" alt="A pull request with its reviewers next to a list of GitHub Actions runs" width="800">
 
+The pull request and CI panels are shown side by side here; the app shows one at a time.
+
 ### Timeline
 
 Your prompts to the focused Claude Code agent, each with its duration, output tokens, files changed and commands run.
@@ -73,19 +77,19 @@ A token dashboard built from Claude Code, Codex, OpenCode, Pi and Antigravity lo
 - `ctrl-space w` picks a space and `ctrl-space alt-t` shows the session tree.
 - `ctrl-space ?` shows a cheat sheet of prefix keys. It does not list the keys specific to `glass`; see [`keys.fragment.json`](./keys.fragment.json).
 - `ctrl-space r` shows every agent grouped by stage, with recaps for Claude Code sessions. Opening it downloads the [herdr-recap](https://github.com/mrolafsson/herdr-recap) program from its GitHub releases onto each machine running Claude Code, checks its checksum, runs it, and has it write out-of-date recaps by asking Claude under your account.
-- On Linux, a desktop notification tells you when an agent needs you or finishes.
-- When a terminal on this machine comes back as a bare shell, for example after a restart, the pack types and runs the command that resumes its Claude Code session. This needs the `claude.session` terminal label, set by a statusline or hook that the pack does not ship.
+- On Linux, in `glass`, `glass-insights` and `omarchy-next`, a desktop notification tells you when an agent needs you or finishes.
+- In `glass`, `glass-insights`, `omarchy` and `omarchy-next`, when a terminal on this machine comes back as a bare shell, for example after a restart, the pack types and runs the command that resumes its Claude Code session. This needs the `claude.session` terminal label, set by a statusline or hook that the pack does not ship. To turn it off, run `herdr-app do layout.hide --id agent-resume-daemon` with the layout shown, in each layout you use, then restart Herdr App.
 - Tabs name themselves after what runs in them. Read [what that sends](#what-tab-naming-does-and-sends).
 
 <img src="docs/images/tree.webp" alt="Session tree listing spaces, tabs and agents with a terminal preview" width="720">
 
-<img src="docs/images/spaces.webp" alt="Space picker showing each space's branch, folder and agent states" width="480">
+<img src="docs/images/spaces.webp" alt="Space picker showing each space's folder, its branch unless it is main, master or the space's name, and agent states" width="480">
 
 ## What tab naming does and sends
 
 The `agent-names` mod runs in the background of the `glass`, `glass-insights`, `omarchy` and `omarchy-next` layouts.
 
-**It also renames tabs you named.** Your name is passed along as a hint and may be replaced: right away for names that existed before the layout first loaded, after 10 minutes for names you type later. Tabs holding only idle shells keep your name.
+**It also renames tabs you named.** Your name is passed along as a hint and may be replaced: right away for names that existed before the layout first loaded, after 10 minutes for names you type later. Tabs holding only idle shells that you have used keep your name. Unused ones on this machine are still marked and closed by tab cleanup, below, even if you named them.
 
 **What it sends.** When a tab's panes change, usually at most once every 10 minutes per tab: the space name, any name you typed, and for each pane the program, status, session or terminal title (a shell's title can include your user name, host and path), current step, folder and branch. For up to two panes per tab that run an agent or report a status, and have no title or step, it also reads the last 40 lines on screen and sends up to 480 characters of each.
 
@@ -98,7 +102,7 @@ The `agent-names` mod runs in the background of the `glass`, `glass-insights`, `
 
 Every tool it tries receives the text, even if its answer is not used, and passes it to that tool's provider under your account. If none gives a name, a local rule does. After an `agy` call the mod deletes that conversation's files when `agy` reports its id; otherwise they stay. `agy` keeps a summary entry either way. `claude` is run without saving a session, and the mod removes nothing that `opencode` stores.
 
-**Tab cleanup.** The mod marks unused shell tabs on this machine `· stale` and closes them after 24 hours of the app running, never the focused tab or a space's last one. It logs closed tabs to `~/.local/state/herdr-tab-cleanup.log`.
+**Tab cleanup.** The mod marks unused shell tabs on this machine (shells showing only their prompt) `· stale`, whether or not you named them. It closes them after 24 hours in a row with one of those layouts running, never the focused tab or a space's last one; a break of more than 15 minutes starts the count again. It logs closed tabs to `~/.local/state/herdr-tab-cleanup.log`.
 
 **To turn it off**, which also stops the cleanup and the session titles in pane headers, run this with the layout shown, then restart Herdr App:
 
@@ -108,7 +112,7 @@ herdr-app do layout.hide --id agent-names-daemon
 
 Repeat it in each layout you use (`glass`, `glass-insights`, `omarchy`, `omarchy-next`). `layout.show` with the same `--id` turns it back on.
 
-Naming starts as soon as you switch to the layout. To send nothing at all, delete the `agent-names-daemon` block from the layout's file in `~/.config/herdr-app/layouts/` after installing and before switching to it. The installer then treats that file as edited and no longer updates it.
+Naming starts as soon as you switch to one of those layouts. For tab naming to send nothing from the start, delete the `agent-names-daemon` block from each of these layouts that you will use (`glass.json`, `glass-insights.json`, `omarchy.json`, `omarchy-next.json` in `~/.config/herdr-app/layouts/`) after installing and before switching to one. The installer then treats those files as edited and no longer updates them. Deleting the block also stops tab cleanup and the session titles in pane headers. Other calls continue: the usage bar still asks `claude` and `codex` for their limits, and opening recap still asks Claude.
 
 ## Install
 
@@ -132,7 +136,7 @@ On macOS, if `herdr-app` is not on your PATH, use `/Applications/Herdr.app/Conte
 | --- | --- |
 | none | Report only, write nothing |
 | `--apply` | Install or update the pack |
-| `--yes` | `--apply`, then install missing programs (uses sudo on Linux and may run terminal-browser's installer) |
+| `--yes` | `--apply`, then install missing programs (uses sudo on Linux; for terminal-browser it may download and run its install script) |
 | `--apply --no-keys` | Install and leave `keys.json` alone |
 | `--apply --link` | Install the mods as symlinks to the checkout |
 
@@ -140,7 +144,7 @@ To update, run `git -C herdr-glass pull`, then `herdr-glass/scripts/install.sh -
 
 ## Requirements
 
-Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing programs and how to get them. On Linux, check `lsof`, `notify-send` and `setsid` yourself.
+Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing programs and how to get them. Check `curl` and `sqlite3` yourself, and on Linux also `lsof`, `notify-send` and `setsid`.
 
 | Program | Used for |
 | --- | --- |
@@ -150,6 +154,7 @@ Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing
 | `python3` | Timeline, Codex session figures in the usage bar, image previews on Linux |
 | `hc` | Usage limits (ships with Herdr App) |
 | `claude`, `codex`, `opencode` (optional) | Usage bar, for the tools you use |
+| `sqlite3` | OpenCode figures in the usage bar |
 | `terminal-browser` | Web pages, on the machine that opens them. On Linux its installer may ask for extra system libraries |
 | `lsof` on this machine, `ss` on remote Linux machines | The Web panel's port list |
 | `notify-send`, `setsid` | Desktop notifications on Linux |
@@ -162,20 +167,20 @@ Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing
 - **Themes.** The pack adds `omarchy` and `catppuccin`: `herdr-app do app.theme --name catppuccin`.
 - **Your own copy.** `herdr-app do layout.clone --name glass --as my-glass`, then edit `layouts/my-glass.json` in `~/.config/herdr-app`: colors, gradient, `window_blur`, panel buttons. To keep the layout's own keys, copy the `layout:glass` section of `keys.json` to `layout:my-glass`.
 - **Hide a block.** `herdr-app do layout.hide --id usage-limits`.
-- **Keys.** [`keys.fragment.json`](./keys.fragment.json) lists every binding the pack adds. It also hands `ctrl-n` to the terminal program, so `ctrl-n` no longer jumps to the next agent while a terminal has focus, and binds `ctrl-left` and `ctrl-right` everywhere to cycle the focused agent and its sub-agents, so terminal programs no longer get those keys. Your own bindings win. The GitHub keys `ctrl-space alt-o` and `alt-p` need the Herdr terminal app with its `herdr-github` plugin.
+- **Keys.** [`keys.fragment.json`](./keys.fragment.json) lists every binding the pack adds. It also hands `ctrl-n` to the terminal program, so a `keys.json` that binds `ctrl-n` to the next agent no longer does that while a terminal has focus, and binds `ctrl-left` and `ctrl-right` to cycle the focused agent and its sub-agents. Your own bindings win. On Linux, Herdr App's default `keys.json` already binds both arrow keys in its `terminal` section to move by words, so inside a terminal they keep doing that. Where your `terminal` section does not bind them, the pack adds them there too, and terminal programs no longer get those keys. To cycle from a terminal too, set `ctrl-left` to `tui-prefix.prev-subagent` and `ctrl-right` to `tui-prefix.next-subagent` in the `terminal` section of `keys.json`; programs then no longer get those keys. The GitHub keys `ctrl-space alt-o` and `alt-p` need the Herdr terminal app with its `herdr-github` plugin.
 
 Other layouts in the pack:
 
 | Layout | What it is |
 | --- | --- |
 | `omarchy`, `omarchy-next` | Our opaque layouts. `omarchy` also needs the `fleet-quota` mod, which is not in the pack |
-| `cockpit` | From [quaresc/cockpit](https://github.com/quaresc/cockpit), unchanged |
+| `cockpit` | From [quaresc/cockpit](https://github.com/quaresc/cockpit), unchanged. It needs the separate [cockpit program](https://github.com/quaresc/cockpit#install), which the pack neither installs nor checks |
 | `herdr-t3` | From [JinJieBeWater/herdr-t3](https://github.com/JinJieBeWater/herdr-t3), unchanged |
 | `workspace` | From [tahadx/workspace](https://github.com/tahadx/workspace), unchanged |
 
 ## Develop
 
-Check a mod with Herdr App, and run the pack's tests, including the check that `requirements.json` lists every program the mods run:
+Check a mod with Herdr App, and run the pack's tests. One test checks that each program a mod names directly in an `exec()` call is in `requirements.json`; programs run through shell scripts or variables are not checked.
 
 ```bash
 herdr-app check mods/<mod-name>
@@ -189,7 +194,7 @@ Much of this pack is other people's work. [`PROVENANCE.md`](./PROVENANCE.md) rec
 | Source | What comes from it | License |
 | --- | --- | --- |
 | [munza/herdr-mods](https://github.com/munza/herdr-mods) | `better-alerts`, `better-changes`, `better-files`; our forks `better-tabs`, `branch-pr`, `better-sidebar-rail`, `rail-next` | Apache-2.0 |
-| [JinJieBeWater/herdr-t3](https://github.com/JinJieBeWater/herdr-t3) | The `t3-*` mods, including the Inbox, and the `herdr-t3` layout | Apache-2.0 |
+| [JinJieBeWater/herdr-t3](https://github.com/JinJieBeWater/herdr-t3) | The `t3-*` mods, including the Inbox, and the `herdr-t3` layout; parts of `goto`, from its picker | Apache-2.0 |
 | [tahadx/workspace](https://github.com/tahadx/workspace) | `agents-list`, `footer`, `hoverfocus`, `icons`, `shortcuts`, `sidebar-menu`, `terminals-list`, `worktrees`, and the `workspace` layout | MIT |
 | [quaresc/cockpit](https://github.com/quaresc/cockpit) | The `cockpit` mod and layout, which bundle Apache-2.0 and MIT code and ISC [Lucide](https://github.com/lucide-icons/lucide) icons ([notices](./LICENSES/quaresc-cockpit.THIRD_PARTY_NOTICES.md)) | MIT and bundled licenses |
 | [linziyanleo/herdr-mods](https://github.com/linziyanleo/herdr-mods) | `preview-plus` ([notices](./mods/preview-plus/THIRD_PARTY.md)) | MIT and bundled licenses |
@@ -199,8 +204,9 @@ Much of this pack is other people's work. [`PROVENANCE.md`](./PROVENANCE.md) rec
 | [mrolafsson/herdr-recap](https://github.com/mrolafsson/herdr-recap) | `recap` | MIT |
 | [herunan/herdr-over9k](https://github.com/herunan/herdr-over9k) | Our fork `over9k-prompts` (Timeline) | MIT |
 | [ohneda/herdr-markdown-browser](https://github.com/ohneda/herdr-markdown-browser) | Our fork `markdown-browser` | MIT |
-| [herdrdev/herdr-app](https://github.com/herdrdev/herdr-app) | Our forks `space-folders`, `space-folders-next` | Apache-2.0 |
+| [herdrdev/herdr-app](https://github.com/herdrdev/herdr-app) | Our forks `space-folders`, `space-folders-next`; the search scorer, match highlighting and status marks in `goto`, from its command palette and agents list; parts of `tui-goto` and `tui-spaces`, from its picker | Apache-2.0 |
+| [Lucide](https://github.com/lucide-icons/lucide) | Icons in `goto` ([notice](./LICENSES/nozikov-herdr-usage-limits.lucide.txt)) | ISC; MIT for the Feather-derived ones |
 
 ## License
 
-Original work is MIT, see [`LICENSE`](./LICENSE). Forked and vendored mods keep their upstream licenses: see [`NOTICE`](./NOTICE) and [`LICENSES/`](./LICENSES/).
+Original work is MIT, see [`LICENSE`](./LICENSE). Forked and vendored mods, and the third-party parts of `goto`, `tui-goto` and `tui-spaces`, keep their upstream licenses: see [`NOTICE`](./NOTICE) and [`LICENSES/`](./LICENSES/).

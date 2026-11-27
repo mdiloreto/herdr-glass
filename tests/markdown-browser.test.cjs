@@ -720,6 +720,19 @@ test("handleLink resolves relative markdown without OpenCode context and posts n
   assert.deepEqual(state.notifications, []);
 });
 
+test("handleLink warns and opens nothing when the OpenCode link context label is unusable", async () => {
+  const state = install({
+    panes: [{ pane: "pane-term", tab: "tab-1", terminal: "term-1", cwd: "/tmp/x", focused: true }],
+    focused: { tab: "tab-1", pane: "pane-term", cwd: "/tmp/x" },
+    terminals: [{ address: "term-1", state: "live", labels: { "opencode.link-context": "{}" }, foreground: { name: "opencode", argv: ["opencode"] } }],
+  });
+  const link = { kind: "file", raw: "docs/b.md", path: null };
+  const source = { cwd: "/tmp/x", machine: null, pane: "pane-term", tab: "tab-1", space: "space-1", terminal: "term-1" };
+  assert.equal(await handleLink({ link, source }), "handled");
+  assert.deepEqual(state.runs, []);
+  assert.equal(state.notifications[0]?.title, "OpenCode link context unavailable");
+});
+
 test("handleLink passes through non-markdown files", async () => {
   const state = install({
     panes: [{ pane: "pane-term", tab: "tab-1", terminal: "term-1", cwd: "/tmp/x", focused: true }],

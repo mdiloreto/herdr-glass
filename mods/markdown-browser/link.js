@@ -131,7 +131,7 @@ export async function handleLink({ link, source }) {
   const context = agent ? await openCodeContext(source, agent) : null;
   // A label that yields no context is stale or racing; with no label, resolve against the pane cwd like other terminals.
   if (agent && !context && agent.labels?.["opencode.link-context"] != null) return warnOpenCodeContext();
-  const root =context?.directory ?? (absolute(cwd) ? cwd : null);
+  const root = context?.directory ?? (absolute(cwd) ? cwd : null);
   if (uri?.authority && uri.authority !== "localhost") {
     // The authority is only compared, never used as an execution or preview target.
     const hostname = await commandOutput("hostname", [], machine);

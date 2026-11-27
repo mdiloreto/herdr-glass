@@ -8,7 +8,15 @@ export const USAGE_LIMITS_STATE_KEY = "usage-limits.state";
 export const PROTOCOL_VERSION = 1;
 export const HISTORY_LIMIT = 50;
 export const DEFAULT_DELAY_SEC = 60;
+export const MAX_DELAY_SEC = 3600;
 export const DEFAULT_PROMPT = "The usage limit has reset. Continue from where you left off.";
+export const MAX_HANDLED_FINGERPRINTS = 500;
+export const MAX_PROMOTED_EPISODES = 500;
+export const MAX_EPISODE_ATTEMPTS_KEYS = 500;
+export const MAX_TERMINAL_COOLDOWNS = 200;
+export const MAX_STALE_SEND_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours past resetsAtMs
+export const MAX_QUEUE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours past detectedAtMs
+export const MAX_RESTORED_ATTEMPTS = 10;
 
 export const SUPPORTED_AGENTS = ["claude", "codex", "opencode"];
 export const VALID_QUEUE_STATUSES = new Set(["waiting", "resuming", "paused"]);
@@ -65,7 +73,7 @@ export function normalizeSettings(raw) {
   if (!raw || typeof raw !== "object") return base;
   const delaySec =
     typeof raw.delaySec === "number" && Number.isFinite(raw.delaySec) && raw.delaySec >= 0
-      ? Math.floor(raw.delaySec)
+      ? Math.min(Math.floor(raw.delaySec), MAX_DELAY_SEC)
       : base.delaySec;
   const rawAgents = raw.agents && typeof raw.agents === "object" ? raw.agents : {};
   const agents = {
@@ -73,9 +81,16 @@ export function normalizeSettings(raw) {
     codex: typeof rawAgents.codex === "boolean" ? rawAgents.codex : base.agents.codex,
     opencode: typeof rawAgents.opencode === "boolean" ? rawAgents.opencode : base.agents.opencode,
   };
-  const prompt =
-    typeof raw.prompt === "string" && raw.prompt.trim().length > 0 ? raw.prompt : base.prompt;
-  return { delaySec, agents, prompt };
+  // Never trust arbitrary persisted prompt overrides from shared state.
+  return { delaySec, agents, prompt: DEFAULT_PROMPT };
+}
+
+export function isEntryExpired(entry, nowMs = Date.now()) {
+  if (!entry || typeof entry !== "object") return true;
+  if (!Number.isFinite(entry.resetsAtMs) || !Number.isFinite(entry.detectedAtMs)) return true;
+  if (nowMs - entry.resetsAtMs > MAX_STALE_SEND_AGE_MS) return true;
+  if (nowMs - entry.detectedAtMs > MAX_QUEUE_AGE_MS) return true;
+  return false;
 }
 
 export function normalizeQueueEntry(raw, nowMs = Date.now()) {
@@ -85,28 +100,56 @@ export function normalizeQueueEntry(raw, nowMs = Date.now()) {
   if (typeof raw.resetsAtMs !== "number" || !Number.isFinite(raw.resetsAtMs)) return null;
   if (typeof raw.resumeAtMs !== "number" || !Number.isFinite(raw.resumeAtMs)) return null;
   if (typeof raw.errorFingerprint !== "string" || !raw.errorFingerprint) return null;
+  const detectedAtMs =
+    typeof raw.detectedAtMs === "number" && Number.isFinite(raw.detectedAtMs)
+      ? raw.detectedAtMs
+      : nowMs;
+  if (nowMs - raw.resetsAtMs > MAX_STALE_SEND_AGE_MS) return null;
+  if (nowMs - detectedAtMs > MAX_QUEUE_AGE_MS) return null;
   const status = VALID_QUEUE_STATUSES.has(raw.status) ? raw.status : "waiting";
+  const attempts =
+    typeof raw.attempts === "number" && Number.isFinite(raw.attempts) && raw.attempts >= 0
+      ? Math.min(Math.floor(raw.attempts), MAX_RESTORED_ATTEMPTS)
+      : 0;
   return {
     address: raw.address,
     machine: typeof raw.machine === "string" && raw.machine ? raw.machine : machineOf(raw.address),
     agent: raw.agent,
     provider: SUPPORTED_AGENTS.includes(raw.provider) ? raw.provider : raw.agent,
     sessionId: typeof raw.sessionId === "string" && raw.sessionId ? raw.sessionId : null,
+    transcriptUuid:
+      typeof raw.transcriptUuid === "string" && raw.transcriptUuid ? raw.transcriptUuid : null,
     title: typeof raw.title === "string" && raw.title ? raw.title : raw.address,
     where: typeof raw.where === "string" && raw.where ? raw.where : null,
-    detectedAtMs:
-      typeof raw.detectedAtMs === "number" && Number.isFinite(raw.detectedAtMs)
-        ? raw.detectedAtMs
-        : nowMs,
+    detectedAtMs,
     resetsAtMs: raw.resetsAtMs,
     resumeAtMs: raw.resumeAtMs,
     resetSource: VALID_RESET_SOURCES.has(raw.resetSource) ? raw.resetSource : "fallback",
     reason: typeof raw.reason === "string" && raw.reason ? raw.reason : "rate limit",
     errorTurn: typeof raw.errorTurn === "number" && Number.isFinite(raw.errorTurn) ? raw.errorTurn : null,
     errorFingerprint: raw.errorFingerprint,
-    // Recover any entry left mid-flight as "resuming" across restarts back to "waiting"
+    episodeKey: typeof raw.episodeKey === "string" && raw.episodeKey ? raw.episodeKey : null,
+    matchedLine: typeof raw.matchedLine === "string" && raw.matchedLine ? raw.matchedLine : null,
+    // Reset any stale mid-flight "resuming" entry across restarts back to "waiting"
     status: status === "resuming" ? "waiting" : status,
-    attempts: typeof raw.attempts === "number" && Number.isFinite(raw.attempts) && raw.attempts >= 0 ? Math.floor(raw.attempts) : 0,
+    attempts,
+    getFailures:
+      typeof raw.getFailures === "number" && Number.isFinite(raw.getFailures) && raw.getFailures >= 0
+        ? Math.min(Math.floor(raw.getFailures), 100)
+        : 0,
+    transcriptFailures:
+      typeof raw.transcriptFailures === "number" &&
+      Number.isFinite(raw.transcriptFailures) &&
+      raw.transcriptFailures >= 0
+        ? Math.min(Math.floor(raw.transcriptFailures), 100)
+        : 0,
+    screenFailures:
+      typeof raw.screenFailures === "number" &&
+      Number.isFinite(raw.screenFailures) &&
+      raw.screenFailures >= 0
+        ? Math.min(Math.floor(raw.screenFailures), 100)
+        : 0,
+    sawExhausted: Boolean(raw.sawExhausted),
     lastCheckMs:
       typeof raw.lastCheckMs === "number" && Number.isFinite(raw.lastCheckMs)
         ? raw.lastCheckMs
@@ -132,15 +175,43 @@ export function normalizeHistoryEntry(raw) {
   };
 }
 
+function normalizeStringSetList(raw, limit) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    if (typeof item !== "string" || !item) continue;
+    if (seen.has(item)) continue;
+    seen.add(item);
+    out.push(item);
+  }
+  return out.length > limit ? out.slice(out.length - limit) : out;
+}
+
+function normalizeNumberMap(raw, limit) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const entries = [];
+  for (const [k, v] of Object.entries(raw)) {
+    if (!k || typeof v !== "number" || !Number.isFinite(v) || v < 0) continue;
+    entries.push([k, v]);
+  }
+  const trimmed = entries.length > limit ? entries.slice(entries.length - limit) : entries;
+  return Object.fromEntries(trimmed);
+}
+
 export function defaultState(nowMs = Date.now()) {
   return {
     version: PROTOCOL_VERSION,
-    enabled: true,
+    enabled: false,
     updatedAtMs: nowMs,
     lastHandledCommandId: null,
     settings: defaultSettings(),
     queue: [],
     history: [],
+    handledFingerprints: [],
+    promotedEpisodes: [],
+    episodeAttempts: {},
+    terminalCooldowns: {},
   };
 }
 
@@ -154,7 +225,7 @@ export function normalizeState(raw, nowMs = Date.now()) {
     : [];
   return {
     version: PROTOCOL_VERSION,
-    enabled: typeof raw.enabled === "boolean" ? raw.enabled : true,
+    enabled: typeof raw.enabled === "boolean" ? raw.enabled : false,
     updatedAtMs:
       typeof raw.updatedAtMs === "number" && Number.isFinite(raw.updatedAtMs)
         ? raw.updatedAtMs
@@ -166,6 +237,10 @@ export function normalizeState(raw, nowMs = Date.now()) {
     settings: normalizeSettings(raw.settings),
     queue,
     history,
+    handledFingerprints: normalizeStringSetList(raw.handledFingerprints, MAX_HANDLED_FINGERPRINTS),
+    promotedEpisodes: normalizeStringSetList(raw.promotedEpisodes, MAX_PROMOTED_EPISODES),
+    episodeAttempts: normalizeNumberMap(raw.episodeAttempts, MAX_EPISODE_ATTEMPTS_KEYS),
+    terminalCooldowns: normalizeNumberMap(raw.terminalCooldowns, MAX_TERMINAL_COOLDOWNS),
   };
 }
 

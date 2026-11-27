@@ -120,13 +120,12 @@ export function findActiveQuotaError(entries, nowMs = Date.now(), { maxAgeMs = M
       return null;
     }
 
-    const uuid =
-      typeof e.uuid === "string" && e.uuid.trim()
-        ? e.uuid.trim()
-        : `transcript:${stableHash(`${timestampMs ?? ""}:${resetsAtMs}`)}`;
+    const rawUuid = typeof e.uuid === "string" && e.uuid.trim() ? e.uuid.trim() : null;
+    const uuid = rawUuid ?? `transcript:${stableHash(`${timestampMs ?? ""}:${resetsAtMs}`)}`;
 
     return {
       uuid,
+      transcriptUuid: rawUuid,
       resetsAtMs,
       timestampMs,
       reason: extractTranscriptReason(e),

@@ -11,7 +11,7 @@ This repository packages the `glass` and `glass-insights` Herdr App layouts, the
 ## Contents
 
 - `layouts/`
-  - `glass.json` — main translucent glass layout with sidebar rail, T3 inbox stack, right panel (`better-files`, `better-changes`, `markdown-browser`, `web-browser`, `branch-pr`, `ci-dash`, `over9k-prompts`), `usage-limits` bar, and background daemons (`tui-prefix`, `agent-names`, `agent-resume`, `goto`).
+  - `glass.json` — main translucent glass layout with sidebar rail, T3 inbox stack, right panel (`better-files`, `better-changes`, `markdown-browser`, `web-browser`, `branch-pr`, `ci-dash`, `over9k-prompts`), `usage-limits` bar, and background daemons (`tui-prefix`, `agent-names`, `agent-resume`, `quota-resume` — off by default and toggled in the Insights tab, `goto`).
   - `glass-insights.json` — variant with compact sidebar footer height tuned for Insights workflows.
   - `omarchy.json`, `omarchy-next.json` — our other layouts.
   - `cockpit.json`, `herdr-t3.json` (+ `herdr-t3.svg`), `workspace.json` (+ `workspace.svg`) — third-party layouts shipped unchanged. The `.svg` files are layout previews and are copied with the `.json`.

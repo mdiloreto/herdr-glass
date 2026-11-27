@@ -57,11 +57,16 @@ function createHarness({
   panes = [],
   spaces = [],
   sharedInit = {},
+  enabled = true,
   hcHandler,
   execHandler,
+  hcTimeoutMs,
 } = {}) {
   let clock = nowMs;
   const sharedStore = { ...sharedInit };
+  if (enabled !== null && !Object.prototype.hasOwnProperty.call(sharedStore, "quota-resume.state")) {
+    sharedStore["quota-resume.state"] = { version: 1, enabled };
+  }
   const hcCalls = [];
   const execCalls = [];
   const notifyCalls = [];
@@ -93,6 +98,7 @@ function createHarness({
       clock += ms;
     },
     log: () => {},
+    ...(hcTimeoutMs != null ? { hcTimeoutMs } : {}),
   };
 
   return {
@@ -121,9 +127,14 @@ test("protocol: state normalization, history cap, and command parsing", async ()
 
   const def = protocol.defaultState(12345);
   assert.equal(def.version, 1);
-  assert.equal(def.enabled, true);
+  assert.equal(def.enabled, false);
   assert.equal(def.settings.delaySec, 60);
   assert.deepEqual(def.settings.agents, { claude: true, codex: true, opencode: true });
+
+  // Trusted shared state: persisted prompt overrides are rejected in favor of DEFAULT_PROMPT.
+  const normSettings = protocol.normalizeSettings({ prompt: "rm -rf /", delaySec: 99999 });
+  assert.equal(normSettings.prompt, protocol.DEFAULT_PROMPT);
+  assert.equal(normSettings.delaySec, protocol.MAX_DELAY_SEC);
 
   let hist = [];
   for (let i = 0; i < 65; i++) {
@@ -865,17 +876,853 @@ test("engine: deferred Claude transcript entry still detects reply via error UUI
   assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
 });
 
-test("layouts: do not mount quota-resume-daemon", () => {
+test("layouts: mount quota-resume-daemon right below agent-resume-daemon", () => {
   const layoutFiles = ["glass.json", "glass-insights.json", "omarchy.json", "omarchy-next.json"];
   for (const name of layoutFiles) {
     const file = path.join(root, "layouts", name);
     const data = JSON.parse(fs.readFileSync(file, "utf8"));
+    let foundPair = false;
     const visit = (node) => {
       if (!node || typeof node !== "object") return;
-      assert.notEqual(node.id, "quota-resume-daemon", `${name}: quota-resume-daemon mounted`);
-      assert.notEqual(node.content?.mod, "quota-resume", `${name}: quota-resume mod mounted`);
-      for (const value of Object.values(node)) visit(value);
+      if (Array.isArray(node.children)) {
+        const idx = node.children.findIndex((c) => c?.id === "agent-resume-daemon");
+        if (idx !== -1) {
+          const next = node.children[idx + 1];
+          assert.ok(next, `${name}: missing block after agent-resume-daemon`);
+          assert.equal(next.id, "quota-resume-daemon", `${name}: next block id`);
+          assert.equal(next.content?.mod, "quota-resume", `${name}: next block mod`);
+          assert.deepEqual(next.size, { px: 0 }, `${name}: next block size`);
+          foundPair = true;
+        }
+        node.children.forEach(visit);
+      }
     };
     visit(data);
+    assert.ok(foundPair, `${name}: did not find agent-resume-daemon + quota-resume-daemon pair`);
+  }
+});
+
+test("hardening A1/F1/F12: stale banner never loops and timeless banners are terminal-scoped", async () => {
+  const { engine } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+
+  const codexTerm = (overrides = {}) =>
+    makeTerminal({
+      address: "t1",
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "done" },
+      labels: {},
+      argv: ["codex"],
+      ...overrides,
+    });
+
+  // Case 1: Superseded banner (user turn + reply below banner) -> 0 sends.
+  {
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm()],
+      hcHandler: async (args) => {
+        if (args[0] === "read") {
+          assert.deepEqual(args.slice(2), ["--lines", "0"]);
+          return { code: 0, stdout: "Error: usage_limit_reached. Try again in 4m.\n› continue\n• ok\n› ", stderr: "" };
+        }
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm()), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    for (let i = 0; i < 5; i++) {
+      await eng.tick();
+      h.advance(5 * MIN + 1000);
+      await eng.tick();
+      h.setTerminals([codexTerm({ turn: 11 + i })]);
+    }
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+
+  // Case 2: Un-superseded stale banner left on screen across turns -> at most 1 send total.
+  {
+    let currentTurn = 10;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm({ turn: currentTurn })],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "Error: usage_limit_reached. Try again in 4m.\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm({ turn: currentTurn })), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    for (let i = 0; i < 5; i++) {
+      await eng.tick();
+      h.advance(5 * MIN + 1000);
+      await eng.tick();
+      currentTurn = 11 + i;
+      h.setTerminals([codexTerm({ turn: currentTurn })]);
+    }
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
+  }
+
+  // Case 3 (F12): Same timeless banner on second terminal t2 is still queued after t1 resumed.
+  {
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm({ address: "t1" })],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "Error: usage_limit_reached\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm({ address: args[1] })), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    h.advance(7 * MIN);
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
+    h.setTerminals([codexTerm({ address: "t1" }), codexTerm({ address: "t2" })]);
+    h.advance(HOUR);
+    await eng.tick();
+    assert.equal(eng.getState().queue.some((q) => q.address === "t2"), true);
+  }
+});
+
+test("hardening A2/F2: does not promote on 99% same window and caps early promotion per episode", async () => {
+  const { engine, protocol } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  const reset = T0 + 5 * HOUR;
+
+  let n = 0;
+  let errAt = T0;
+  const t = () => makeTerminal({ turn: 10 + n });
+  const h = createHarness({
+    nowMs: T0,
+    terminals: [t()],
+    execHandler: async () => ({
+      code: 0,
+      stdout: JSON.stringify({
+        type: "assistant",
+        uuid: `err-${n}`,
+        isApiErrorMessage: true,
+        timestamp: new Date(errAt).toISOString(),
+        quotaLimits: { resetsAt: reset / 1000, rateLimitType: "five_hour" },
+      }),
+      stderr: "",
+    }),
+    hcHandler: async (args) => {
+      if (args[0] === "get") return { code: 0, stdout: JSON.stringify(t()), stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+
+  const eng = engine.createEngine(h.env);
+  for (let i = 0; i < 12; i++) {
+    await eng.tick();
+    h.advance(5 * MIN);
+    h.sharedStore[protocol.USAGE_LIMITS_STATE_KEY] = {
+      claude: {
+        report: {
+          status: "ok",
+          observedAt: Math.floor((T0 + (i + 1) * 5 * MIN) / 1000),
+          windows: [{ id: "session", short: "5h", percent: 99, resetsAt: reset / 1000 }],
+        },
+      },
+    };
+    const before = h.hcCalls.filter((a) => a[0] === "send").length;
+    await eng.tick();
+    if (h.hcCalls.filter((a) => a[0] === "send").length > before) {
+      n++;
+      errAt = T0 + (i + 1) * 5 * MIN;
+      h.setTerminals([t()]);
+    }
+  }
+  assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+});
+
+test("hardening A3/F3/F13/F14: rejects ordinary prose, detects Claude window variants, parses unparenthesized UTC", async () => {
+  const { screen } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+
+  // F3: ordinary agent prose must never trigger
+  assert.equal(
+    screen.detectScreenRateLimit({
+      agent: "codex",
+      address: "t1",
+      text: "• Added retry handling for rate_limit_exceeded in client.ts.\n› ",
+      nowMs: T0,
+    }),
+    null,
+  );
+  assert.equal(
+    screen.detectScreenRateLimit({
+      agent: "opencode",
+      address: "t1",
+      text: "The upstream returned HTTP 429. Should I delete the cache table?\n> ",
+      nowMs: T0,
+    }),
+    null,
+  );
+
+  // F13: Claude 5-hour / weekly / session banners
+  for (const text of [
+    "You've hit your 5-hour limit · resets 3:20pm (America/Argentina/Buenos_Aires)",
+    "You've hit your weekly limit · resets 7pm (UTC)",
+    "You've hit your session limit · resets 7pm (UTC)",
+  ]) {
+    assert.ok(screen.detectScreenRateLimit({ agent: "claude", address: "t1", text, nowMs: T0 }), text);
+  }
+
+  // F14: unparenthesized and parenthesized UTC parse identically to 19:00Z
+  assert.equal(new Date(screen.parseResetTime("resets at 19:00 UTC", T0)).toISOString(), "2026-11-26T19:00:00.000Z");
+  assert.equal(new Date(screen.parseResetTime("resets at 19:00 (UTC)", T0)).toISOString(), "2026-11-26T19:00:00.000Z");
+});
+
+test("hardening A4/F4: positively verifies foreground process (rejects nvim/ssh/psql/python3/missing, allows node wrapper)", async () => {
+  const { engine } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+
+  assert.equal(engine.identifyForegroundAgent({ name: "nvim" }), null);
+  assert.equal(engine.identifyForegroundAgent({ name: "ssh", argv: ["ssh", "host"] }), null);
+  assert.equal(engine.identifyForegroundAgent({ name: "python3", argv: ["python3", "claude.py"] }), null);
+  assert.equal(engine.identifyForegroundAgent(undefined), null);
+  assert.equal(
+    engine.identifyForegroundAgent({ name: "node", argv: ["node", "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js"] }),
+    "claude",
+  );
+  assert.equal(engine.identifyForegroundAgent({ name: "bun", argv: ["bun", "opencode"] }), "opencode");
+
+  for (const fg of ["nvim", "ssh", "psql", "python3", undefined]) {
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal()],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: "err-1",
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: (T0 + 10 * MIN) / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") {
+          return {
+            code: 0,
+            stdout: JSON.stringify({
+              state: "live",
+              turn: 10,
+              foreground: fg ? { name: fg } : undefined,
+              status: { app: "claude-code", state: "idle" },
+              labels: { "claude.session": UUID_1 },
+            }),
+            stderr: "",
+          };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    h.setNow(T0 + 11 * MIN);
+    const st = await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, `fg=${fg}`);
+    assert.equal(st.history[0].outcome, "skipped-session", `fg=${fg}`);
+  }
+});
+
+test("hardening A5/F5: detects unsent draft in composer and skips sending", async () => {
+  const { engine, screen } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+
+  assert.equal(screen.hasUnsentDraft("Error: usage_limit_reached. Try again in 4m.\n› please also drop the old tab"), true);
+  assert.equal(screen.hasUnsentDraft("Error: usage_limit_reached. Try again in 4m.\n› "), false);
+  assert.equal(screen.hasUnsentDraft('You\'ve hit your limit\n❯ Try "refactor utils.ts"\n? for shortcuts'), false);
+
+  const codexTerm = makeTerminal({
+    address: "t1",
+    program: { key: "codex", name: "Codex", agent: true, shell: false },
+    foreground: { pid: 200, name: "codex" },
+    report: { app: "codex", state: "done" },
+    labels: {},
+    argv: ["codex"],
+  });
+
+  const h = createHarness({
+    nowMs: T0,
+    terminals: [codexTerm],
+    hcHandler: async (args) => {
+      if (args[0] === "read") {
+        return { code: 0, stdout: "Error: usage_limit_reached. Try again in 4m.\n› please also drop the old tab", stderr: "" };
+      }
+      if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+  const eng = engine.createEngine(h.env);
+  await eng.tick();
+  h.advance(6 * MIN);
+  await eng.tick();
+  assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+});
+
+test("hardening A6/F6/F10: fails closed on transcript timeout, uses --if idle, publishes resuming before send, defers on transient get error", async () => {
+  const { engine, protocol } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+  const reset = T0 + 10 * MIN;
+
+  // F6: terminal turns working during transcript re-read which throws -> must NOT send!
+  {
+    let live = "idle";
+    let due = false;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal()],
+      execHandler: async () => {
+        if (due) {
+          live = "working";
+          throw new Error("timeout");
+        }
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            type: "assistant",
+            uuid: "err-1",
+            isApiErrorMessage: true,
+            timestamp: new Date(T0).toISOString(),
+            quotaLimits: { resetsAt: reset / 1000, rateLimitType: "five_hour" },
+          }),
+          stderr: "",
+        };
+      },
+      hcHandler: async (args) => {
+        if (args[0] === "get") {
+          due = true;
+          return { code: 0, stdout: JSON.stringify(makeFreshGet({ status: { app: "claude-code", state: live } })), stderr: "" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    h.setNow(reset + MIN);
+    await eng.tick();
+    assert.equal(live, "working");
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+
+  // Idle status passes `--if idle` and publishes `resuming` to shared state BEFORE `hc send`!
+  {
+    let statusPublishedBeforeSend = null;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal({ status: "idle" })],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: "err-idle-1",
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: reset / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") {
+          return { code: 0, stdout: JSON.stringify(makeFreshGet({ status: { app: "claude-code", state: "idle" } })), stderr: "" };
+        }
+        if (args[0] === "send") {
+          statusPublishedBeforeSend = h.sharedStore[protocol.STATE_KEY]?.queue?.[0]?.status ?? null;
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    h.setNow(reset + MIN);
+    await eng.tick();
+    assert.equal(statusPublishedBeforeSend, "resuming");
+    const sendCall = h.hcCalls.find((a) => a[0] === "send");
+    assert.deepEqual(sendCall, ["send", "--if", "idle", "t1", protocol.DEFAULT_PROMPT]);
+  }
+
+  // F10: transient `hc get` error at fire time defers instead of marking skipped-closed!
+  {
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal({ address: "linux/t1" })],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: "err-1",
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: reset / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") return { code: 1, stdout: "", stderr: "unreachable" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    h.setTerminals([]);
+    h.setNow(reset + MIN);
+    const st = await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+    assert.equal(st.queue.length, 1);
+    assert.equal(st.history.length, 0);
+  }
+});
+
+test("hardening A7/F7/A8/F8/F9/F11/F15: persisted cancel, default disabled, failed read retry, opencode provider deferral, 72h expiry", async () => {
+  const { engine, protocol } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+
+  // F7: cancel persists across engine reload
+  {
+    const reset = T0 + 10 * MIN;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal()],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: "err-1",
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: reset / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+    });
+    let eng = engine.createEngine(h.env);
+    await eng.tick();
+    await eng.processCommand({ version: 1, id: "c1", action: "cancel", address: "t1" });
+    eng = engine.createEngine(h.env);
+    h.advance(15_000);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 0);
+    h.setNow(reset + MIN);
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+
+  // F8: fresh default is enabled: false and performs zero sends (even on resume-now)
+  {
+    const h = createHarness({
+      nowMs: T0,
+      enabled: null,
+      terminals: [makeTerminal()],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: "err-1",
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: (T0 + 10 * MIN) / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+    });
+    const eng = engine.createEngine(h.env);
+    assert.equal(eng.getState().enabled, false);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 0);
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+
+  // F9: failed screen read does not cache lastInspected, so next tick retries and queues
+  {
+    let reads = 0;
+    const codexTerm = makeTerminal({
+      address: "t1",
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "done" },
+      labels: {},
+      argv: ["codex"],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") {
+          return reads++ === 0
+            ? { code: 1, stdout: "", stderr: "transient" }
+            : { code: 0, stdout: "Error: usage_limit_reached\n› ", stderr: "" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 0);
+    h.advance(15_000);
+    await eng.tick();
+    assert.equal(reads, 2);
+    assert.equal(eng.getState().queue.length, 1);
+  }
+
+  // F11: OpenCode banner mentioning anthropic resolves provider "claude" and defers when Claude is at 100%
+  {
+    const ocTerm = makeTerminal({
+      address: "t1",
+      program: { key: "opencode", name: "OpenCode", agent: true, shell: false },
+      foreground: { pid: 300, name: "opencode" },
+      report: { app: "opencode", state: "done" },
+      labels: {},
+      argv: ["opencode"],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [ocTerm],
+      sharedInit: {
+        [protocol.USAGE_LIMITS_STATE_KEY]: {
+          claude: {
+            report: {
+              status: "ok",
+              observedAt: T0 / 1000 + 120,
+              windows: [{ id: "session", percent: 100, resetsAt: (T0 + 3 * HOUR) / 1000 }],
+            },
+          },
+        },
+      },
+      hcHandler: async (args) => {
+        if (args[0] === "read") {
+          return { code: 0, stdout: "Error: rate limit exceeded (anthropic). Try again in 1m.\n> ", stderr: "" };
+        }
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(ocTerm), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue[0].provider, "claude");
+    h.advance(3 * MIN);
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+
+  // F15: disabled for 72h, then re-enabled -> stale entry expires and sends 0
+  {
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal()],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: "err-1",
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: (T0 + 10 * MIN) / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    await eng.processCommand({ version: 1, id: "c1", action: "toggle-enabled", enabled: false });
+    h.advance(72 * HOUR);
+    await eng.processCommand({ version: 1, id: "c2", action: "toggle-enabled", enabled: true });
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+});
+
+test("hardening: immediate cancel/disable during stagger sleep, hc timeout, missing turn fail-closed, and resume-now guards", async () => {
+  const { engine, protocol } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+  const reset = T0 + 5 * MIN;
+
+  // 1. Immediate sync cancel during stagger sleep aborts second send
+  {
+    const t1 = makeTerminal({ address: "t1", labels: { "claude.session": UUID_1 }, turn: 1 });
+    const t2 = makeTerminal({ address: "t2", labels: { "claude.session": UUID_2 }, turn: 2 });
+    let eng;
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [t1, t2],
+      execHandler: async (_cmd, args) => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: `err-${args[3]}`,
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: reset / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") {
+          const isT1 = args[1] === "t1";
+          return {
+            code: 0,
+            stdout: JSON.stringify(
+              makeFreshGet({
+                address: args[1],
+                turn: isT1 ? 1 : 2,
+                labels: { "claude.session": isT1 ? UUID_1 : UUID_2 },
+              }),
+            ),
+            stderr: "",
+          };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    eng = engine.createEngine(h.env);
+    await eng.tick();
+    h.setNow(reset + MIN);
+    await eng.tick({
+      sleep: async () => {
+        // Cancel t2 synchronously mid-stagger while tick is awaiting sleep!
+        eng.applySyncCommand({ version: 1, id: "cancel-mid-stagger", action: "cancel", address: "t2" });
+      },
+    });
+    const sends = h.hcCalls.filter((a) => a[0] === "send");
+    assert.equal(sends.length, 1);
+    assert.equal(sends[0][1], "t1");
+  }
+
+  // 2. Missing `turn` on `hc get` fails closed (skipped-replied, sends: 0)
+  {
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal({ turn: 10 })],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: "err-missing-turn",
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: reset / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") {
+          const fresh = makeFreshGet();
+          delete fresh.turn;
+          return { code: 0, stdout: JSON.stringify(fresh), stderr: "" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    h.setNow(reset + MIN);
+    const st = await eng.tick();
+    assert.equal(st.history[0].outcome, "skipped-replied");
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+
+  // 3. Hung `hc` call times out cleanly without stalling daemon
+  {
+    const h = createHarness({
+      nowMs: T0,
+      hcTimeoutMs: 25,
+      terminals: [makeTerminal()],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: "err-timeout",
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: reset / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") {
+          return new Promise(() => {}); // hangs forever
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    h.setNow(reset + MIN);
+    const st = await eng.tick();
+    assert.equal(st.queue.length, 1);
+    assert.equal(st.queue[0].getFailures, 1);
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+
+  // 4. `resume-now` refuses when disabled and refuses expired entries; persisted prompt override ignored
+  {
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal()],
+      sharedInit: {
+        [protocol.STATE_KEY]: {
+          version: 1,
+          enabled: false,
+          settings: { prompt: "INJECTED PROMPT", delaySec: 60, agents: { claude: true, codex: true, opencode: true } },
+          queue: [
+            {
+              address: "t1",
+              agent: "claude",
+              provider: "claude",
+              sessionId: UUID_1,
+              transcriptUuid: "err-1",
+              detectedAtMs: T0,
+              resetsAtMs: reset,
+              resumeAtMs: reset + MIN,
+              resetSource: "transcript",
+              reason: "five_hour rate limit",
+              errorTurn: 10,
+              errorFingerprint: "err-1",
+              status: "waiting",
+            },
+          ],
+          history: [],
+        },
+      },
+      hcHandler: async (args) => {
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(makeFreshGet()), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    assert.equal(eng.getState().settings.prompt, protocol.DEFAULT_PROMPT);
+    await eng.processCommand({ version: 1, id: "rn-1", action: "resume-now", address: "t1" });
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+});
+
+test("hardening: runHc timeout works via injected after() and mods/quota-resume has no bare setTimeout/setInterval", async () => {
+  const { engine } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+  const reset = T0 + 5 * MIN;
+
+  // 1. Injected `after` fires timeout without relying on Node's setTimeout, and cancels on completion.
+  let scheduled = [];
+  let cancelledCount = 0;
+  const fakeAfter = (ms, fn) => {
+    const entry = { ms, fn, cancelled: false };
+    scheduled.push(entry);
+    // Fire asynchronously on next microtask for hung calls so Promise.race resolves cleanly.
+    queueMicrotask(() => {
+      if (!entry.cancelled) entry.fn();
+    });
+    return () => {
+      if (!entry.cancelled) {
+        entry.cancelled = true;
+        cancelledCount += 1;
+      }
+    };
+  };
+
+  {
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal()],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: "err-after-timeout",
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: reset / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") return new Promise(() => {}); // hangs forever
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick({ after: fakeAfter });
+    h.setNow(reset + MIN);
+    const st = await eng.tick({ after: fakeAfter });
+    assert.ok(scheduled.length >= 1, "injected after() must be invoked for hc calls");
+    assert.equal(scheduled[0].ms, engine.HC_TIMEOUT_MS);
+    assert.equal(st.queue.length, 1);
+    assert.equal(st.queue[0].getFailures, 1);
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+
+  // Verify cancel() is called when hc resolves before timeout fires.
+  {
+    scheduled = [];
+    cancelledCount = 0;
+    const neverFireAfter = (ms, fn) => {
+      const entry = { ms, fn, cancelled: false };
+      scheduled.push(entry);
+      return () => {
+        entry.cancelled = true;
+        cancelledCount += 1;
+      };
+    };
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [makeTerminal()],
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: "err-after-ok",
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: reset / 1000, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(makeFreshGet()), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick({ after: neverFireAfter });
+    h.setNow(reset + MIN);
+    const st = await eng.tick({ after: neverFireAfter });
+    assert.equal(st.history[0].outcome, "resumed");
+    assert.ok(scheduled.length >= 3);
+    assert.equal(cancelledCount, scheduled.length, "every scheduled timeout must be cancelled in finally");
+  }
+
+  // 2. Static check: no bare setTimeout/clearTimeout/setInterval/clearInterval in mods/quota-resume/.
+  const files = [];
+  const walk = (dir) => {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) walk(full);
+      else if (/\.(?:m?js|cjs)$/.test(ent.name)) files.push(full);
+    }
+  };
+  walk(modDir);
+  assert.ok(files.length >= 5);
+  const bareTimerRe = /(?<![.\w$])(?:setTimeout|clearTimeout|setInterval|clearInterval)\b/;
+  for (const file of files) {
+    const src = fs.readFileSync(file, "utf8");
+    const rel = path.relative(root, file);
+    assert.equal(bareTimerRe.test(src), false, `${rel} must not contain bare setTimeout/setInterval calls`);
   }
 });

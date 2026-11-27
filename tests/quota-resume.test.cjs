@@ -335,36 +335,36 @@ test("transcript: UUID validation, JSONL parsing, active quota error, and reply 
   assert.equal(transcript.hasAssistantReplySince(withReply, UUID_ERR), true);
 });
 
-test("engine: detects remote Claude via transcript, debounces idle terminal, and resumes after reset", async () => {
+test("engine: detects local Claude via transcript, debounces idle terminal, and resumes after reset", async () => {
   const { engine, protocol } = await loadCore();
   const baseMs = Date.parse("2026-11-26T15:00:00Z");
   const resetsAtSec = Math.floor(Date.parse("2026-11-26T15:10:00Z") / 1000);
 
   const transcriptJsonl = JSON.stringify({
     type: "assistant",
-    uuid: "err-remote-1",
+    uuid: "err-local-1",
     isApiErrorMessage: true,
     timestamp: "2026-11-26T14:59:30Z",
     apiErrorParams: { rate_limit_info: { resetsAt: resetsAtSec, rateLimitType: "five_hour" } },
   });
 
-  const remoteTerm = makeTerminal({
-    address: "linux/t3n",
+  const localTerm = makeTerminal({
+    address: "t3n",
     turn: 279,
     labels: { "claude.session": UUID_1, "claude.title": "Herdr layout options" },
   });
 
   const h = createHarness({
     nowMs: baseMs,
-    terminals: [remoteTerm],
-    panes: [{ pane: "p1", terminal: "linux/t3n", tab: "tab-1" }],
+    terminals: [localTerm],
+    panes: [{ pane: "p1", terminal: "t3n", tab: "tab-1" }],
     spaces: [{ id: "sp-1", name: "ISW", tabs: [{ id: "tab-1", name: "cdm-ai pr 318" }] }],
     execHandler: async () => ({ code: 0, stdout: transcriptJsonl, stderr: "" }),
     hcHandler: async (args) => {
       if (args[0] === "get") {
         return {
           code: 0,
-          stdout: JSON.stringify(makeFreshGet({ address: "linux/t3n", turn: 279 })),
+          stdout: JSON.stringify(makeFreshGet({ address: "t3n", turn: 279 })),
           stderr: "",
         };
       }
@@ -377,19 +377,19 @@ test("engine: detects remote Claude via transcript, debounces idle terminal, and
   const st1 = await eng.tick();
   assert.equal(st1.queue.length, 1);
   const q = st1.queue[0];
-  assert.equal(q.address, "linux/t3n");
-  assert.equal(q.machine, "linux");
+  assert.equal(q.address, "t3n");
+  assert.equal(q.machine, null);
   assert.equal(q.agent, "claude");
   assert.equal(q.resetSource, "transcript");
   assert.equal(q.resetsAtMs, resetsAtSec * 1000);
   assert.equal(q.resumeAtMs, resetsAtSec * 1000 + 60_000);
   assert.equal(q.where, "ISW / cdm-ai pr 318");
-  assert.equal(q.errorFingerprint, "err-remote-1");
+  assert.equal(q.errorFingerprint, "err-local-1");
 
-  // Verify exec ran on remote machine "linux" with timeout 8000 and positional UUID
+  // Verify exec ran locally with timeout 8000 and positional UUID
   assert.equal(h.execCalls.length, 1);
   assert.equal(h.execCalls[0].cmd, "sh");
-  assert.equal(h.execCalls[0].opts.on, "linux");
+  assert.equal(h.execCalls[0].opts.on, null);
   assert.equal(h.execCalls[0].opts.timeout, 8000);
   assert.equal(h.execCalls[0].args[3], UUID_1);
 
@@ -404,10 +404,10 @@ test("engine: detects remote Claude via transcript, debounces idle terminal, and
   assert.equal(st2.queue.length, 0);
   assert.equal(st2.history.length, 1);
   assert.equal(st2.history[0].outcome, "resumed");
-  assert.equal(st2.history[0].machine, "linux");
+  assert.equal(st2.history[0].machine, null);
   const sends = h.hcCalls.filter((a) => a[0] === "send");
   assert.equal(sends.length, 1);
-  assert.deepEqual(sends[0], ["send", "--if", "idle", "linux/t3n", protocol.DEFAULT_PROMPT]);
+  assert.deepEqual(sends[0], ["send", "--if", "idle", "t3n", protocol.DEFAULT_PROMPT]);
   assert.equal(h.notifyCalls.length, 1);
   assert.equal(h.notifyCalls[0].level, "info");
 
@@ -834,7 +834,7 @@ test("engine: identifies opencode.exe foreground process and fires safely", asyn
   assert.equal(engine.identifyAgent({ foreground: { name: "/usr/bin/codex.exe" } }), "codex");
 
   const ocExeTerm = makeTerminal({
-    address: "linux/t9",
+    address: "t9",
     turn: 7,
     program: { key: "agent", name: "Agent", agent: true, shell: false },
     foreground: { pid: 500, name: "opencode.exe" },
@@ -854,7 +854,7 @@ test("engine: identifies opencode.exe foreground process and fires safely", asyn
         return {
           code: 0,
           stdout: JSON.stringify({
-            address: "linux/t9",
+            address: "t9",
             state: "live",
             turn: 7,
             foreground: { pid: 500, name: "opencode.exe" },
@@ -878,7 +878,7 @@ test("engine: identifies opencode.exe foreground process and fires safely", asyn
   const st2 = await eng.tick();
   assert.equal(st2.queue.length, 0);
   assert.equal(st2.history[0].outcome, "resumed");
-  assert.equal(h.hcCalls.filter((a) => a[0] === "send" && a[3] === "linux/t9").length, 1);
+  assert.equal(h.hcCalls.filter((a) => a[0] === "send" && a[3] === "t9").length, 1);
 });
 
 test("engine: deferred Claude transcript entry still detects reply via error UUID", async () => {
@@ -2011,7 +2011,7 @@ test("hardening A6/F6/F10 (#4, #6, #12): replaced banner defers, atomic --if idl
     const reset1m = T0 + MIN;
     const h = createHarness({
       nowMs: T0,
-      terminals: [makeTerminal({ address: "linux/t1", turn: 10 })],
+      terminals: [makeTerminal({ address: "t1", turn: 10 })],
       execHandler: async () => ({
         code: 0,
         stdout: JSON.stringify({
@@ -2026,7 +2026,7 @@ test("hardening A6/F6/F10 (#4, #6, #12): replaced banner defers, atomic --if idl
       hcHandler: async (args) => {
         if (args[0] === "get") {
           if (getFail) return { code: 1, stdout: "", stderr: "unreachable" };
-          return { code: 0, stdout: JSON.stringify(makeFreshGet({ address: "linux/t1", turn: 10 })), stderr: "" };
+          return { code: 0, stdout: JSON.stringify(makeFreshGet({ address: "t1", turn: 10 })), stderr: "" };
         }
         return { code: 0, stdout: "", stderr: "" };
       },
@@ -2056,7 +2056,7 @@ test("hardening A6/F6/F10 (#4, #6, #12): replaced banner defers, atomic --if idl
     let getCalls = 0;
     const h = createHarness({
       nowMs: T0,
-      terminals: [makeTerminal({ address: "linux/t2", turn: 10 })],
+      terminals: [makeTerminal({ address: "t2", turn: 10 })],
       execHandler: async () => ({
         code: 0,
         stdout: JSON.stringify({
@@ -2073,7 +2073,7 @@ test("hardening A6/F6/F10 (#4, #6, #12): replaced banner defers, atomic --if idl
           getCalls += 1;
           // Odd calls are preGet (succeed), even calls are finalGet (fail)!
           if (getCalls % 2 === 1) {
-            return { code: 0, stdout: JSON.stringify(makeFreshGet({ address: "linux/t2", turn: 10 })), stderr: "" };
+            return { code: 0, stdout: JSON.stringify(makeFreshGet({ address: "t2", turn: 10 })), stderr: "" };
           }
           return { code: 1, stdout: "", stderr: "final get transient fail" };
         }
@@ -3203,7 +3203,7 @@ test("hardening (#7, #16): main.js lifecycle — close() mid-tick aborts a real 
     const view = new QuotaResume();
     view.init({}, fakeCx);
 
-    for (let i = 0; i < 10 && !releaseRead; i++) {
+    for (let i = 0; i < 30 && !releaseRead; i++) {
       await Promise.resolve();
     }
     assert.ok(releaseRead, "main.js tick should be blocked inside hc read");
@@ -3884,5 +3884,577 @@ test("followups (#16, #18, size): abandoned claim recovery, dropped write rollba
     assert.equal(Object.keys(norm.claims).length, 0, "expired claims must be pruned");
     const bytes = Buffer.byteLength(JSON.stringify(norm), "utf8");
     assert.ok(bytes < 15_000, `populated bookkeeping state must be <15 KB (got ${bytes} bytes)`);
+  }
+});
+
+test("pr19-final (#1): own-machine-only sending — remote terminals never queue or send, Mac+Linux produce 1 send total", async () => {
+  const { engine, protocol } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+  const resetSec = Math.floor((T0 + 2 * MIN) / 1000);
+
+  // isCandidateTerminal rejects remote addresses and accepts local addresses.
+  assert.equal(engine.isCandidateTerminal(makeTerminal({ address: "mac/t7" })), false);
+  assert.equal(engine.isCandidateTerminal(makeTerminal({ address: "linux/t12" })), false);
+  assert.equal(engine.isCandidateTerminal(makeTerminal({ address: "t7" })), true);
+
+  // normalizeQueueEntry drops persisted remote entries while keeping local entries.
+  const baseRawEntry = {
+    agent: "codex",
+    provider: "codex",
+    detectedAtMs: T0,
+    resetsAtMs: T0 + 2 * MIN,
+    resumeAtMs: T0 + 3 * MIN,
+    resetSource: "screen",
+    reason: "usage limit reached",
+    errorTurn: 10,
+    errorFingerprint: "screen:t7:codex:codex-hit-limit:deadbeef",
+    status: "waiting",
+  };
+  assert.equal(protocol.normalizeQueueEntry({ ...baseRawEntry, address: "mac/t7" }, T0), null);
+  assert.equal(protocol.normalizeQueueEntry({ ...baseRawEntry, address: "linux/t12" }, T0), null);
+  assert.ok(protocol.normalizeQueueEntry({ ...baseRawEntry, address: "t7" }, T0));
+
+  // Remote terminals (mac/t7, linux/t12) are neither queued nor sent, even if pre-populated in persisted state or via resume-now.
+  {
+    const remoteMac = makeTerminal({
+      address: "mac/t7",
+      turn: 10,
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "idle" },
+      labels: {},
+      argv: ["codex"],
+    });
+    const remoteLinux = makeTerminal({
+      address: "linux/t12",
+      turn: 10,
+      labels: { "claude.session": UUID_1 },
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [remoteMac, remoteLinux],
+      sharedInit: {
+        [protocol.STATE_KEY]: {
+          version: 1,
+          enabled: true,
+          queue: [
+            { ...baseRawEntry, address: "mac/t7", machine: "mac" },
+            { ...baseRawEntry, address: "linux/t12", machine: "linux", agent: "claude", provider: "claude" },
+          ],
+          history: [],
+        },
+      },
+      execHandler: async () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          type: "assistant",
+          uuid: UUID_ERR,
+          isApiErrorMessage: true,
+          timestamp: new Date(T0).toISOString(),
+          quotaLimits: { resetsAt: resetSec, rateLimitType: "five_hour" },
+        }),
+        stderr: "",
+      }),
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "You've hit your usage limit. Try again in 2m.\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(remoteMac), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+
+    const eng = engine.createEngine(h.env);
+    assert.equal(eng.getState().queue.length, 0, "persisted remote queue entries must be dropped on load");
+
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 0, "remote terminals must not be queued");
+    assert.equal(h.execCalls.length, 0, "must not probe remote transcript");
+    assert.equal(h.hcCalls.length, 0, "must not read/get/send remote terminals");
+
+    // Invoking resume-now on remote addresses must send 0.
+    await eng.processCommand({ version: 1, id: "cmd-rn-mac", action: "resume-now", address: "mac/t7", atMs: T0 + 1000 });
+    await eng.processCommand({ version: 1, id: "cmd-rn-linux", action: "resume-now", address: "linux/t12", atMs: T0 + 2000 });
+    h.advance(5 * MIN);
+    await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, "remote terminals must never send");
+  }
+
+  // Two separate engines with separate stores simulating Linux (t7) + Mac (linux/t7) viewing the same terminal -> 1 send total!
+  {
+    const sharedSent = [];
+    const makeFleetTerm = (address) =>
+      makeTerminal({
+        address,
+        turn: 10,
+        program: { key: "codex", name: "Codex", agent: true, shell: false },
+        foreground: { pid: 200, name: "codex" },
+        report: { app: "codex", state: "idle" },
+        labels: {},
+        argv: ["codex"],
+      });
+
+    const linuxTerm = makeFleetTerm("t7");
+    const macRemoteViewTerm = makeFleetTerm("linux/t7");
+
+    const makeHostHc = (term) => async (args) => {
+      if (args[0] === "read") return { code: 0, stdout: "You've hit your usage limit. Try again in 2m.\n› ", stderr: "" };
+      if (args[0] === "get") return { code: 0, stdout: JSON.stringify(term), stderr: "" };
+      if (args[0] === "send") {
+        sharedSent.push({ host: term.address, args });
+        return { code: 0, stdout: "", stderr: "" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+
+    const hLinux = createHarness({ nowMs: T0, terminals: [linuxTerm], hcHandler: makeHostHc(linuxTerm) });
+    const hMac = createHarness({ nowMs: T0, terminals: [macRemoteViewTerm], hcHandler: makeHostHc(macRemoteViewTerm) });
+    const engLinux = engine.createEngine(hLinux.env);
+    const engMac = engine.createEngine(hMac.env);
+
+    await Promise.all([engLinux.tick(), engMac.tick()]);
+    assert.equal(engLinux.getState().queue.length, 1, "Linux local engine must queue t7");
+    assert.equal(engMac.getState().queue.length, 0, "Mac remote-view engine must not queue linux/t7");
+
+    hLinux.setNow(T0 + 4 * MIN);
+    hMac.setNow(T0 + 4 * MIN);
+    await Promise.all([engLinux.tick(), engMac.tick()]);
+
+    assert.equal(sharedSent.length, 1, "Linux + Mac viewing the same terminal must produce 1 send total");
+    assert.equal(sharedSent[0].host, "t7", "only local host engine must send");
+    assert.equal(hMac.hcCalls.filter((a) => a[0] === "send").length, 0);
+  }
+});
+
+test("pr19-final (#2): due fire calls get -> get -> read -> send; draft appearing between finalGet and read aborts send", async () => {
+  const { engine } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+
+  // 2a. Exact hc call order on due fire: preGet -> finalGet -> read -> send (Codex screen entry).
+  {
+    const codexTerm = makeTerminal({
+      address: "t1",
+      turn: 10,
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "idle" },
+      labels: {},
+      argv: ["codex"],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "You've hit your usage limit. Try again in 1m.\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+
+    const beforeFireIdx = h.hcCalls.length;
+    h.setNow(T0 + 3 * MIN);
+    const st = await eng.tick();
+    assert.equal(st.history[0].outcome, "resumed");
+    const fireOps = h.hcCalls.slice(beforeFireIdx).map((a) => a[0]);
+    assert.deepEqual(fireOps, ["get", "get", "read", "send"], "due fire must run preGet -> finalGet -> read -> send");
+  }
+
+  // 2b. Draft appearing between finalGet and read aborts the send!
+  {
+    let getCount = 0;
+    let screenText = "You've hit your usage limit. Try again in 1m.\n› ";
+    const codexTerm = makeTerminal({
+      address: "t1",
+      turn: 10,
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "done" },
+      status: "done",
+      labels: {},
+      argv: ["codex"],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [codexTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: screenText, stderr: "" };
+        if (args[0] === "get") {
+          getCount += 1;
+          if (getCount === 2) {
+            // User starts typing a draft right after finalGet returns!
+            screenText = "You've hit your usage limit. Try again in 1m.\n› hold on let me edit the schema first";
+          }
+          return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+
+    const beforeFireIdx = h.hcCalls.length;
+    h.setNow(T0 + 3 * MIN);
+    const st = await eng.tick();
+    const fireOps = h.hcCalls.slice(beforeFireIdx).map((a) => a[0]);
+    assert.deepEqual(fireOps, ["get", "get", "read"], "read after finalGet must catch the draft and skip send");
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+    assert.equal(st.history[0].outcome, "skipped-replied");
+    assert.match(st.history[0].detail, /draft/i);
+  }
+});
+
+test("pr19-final (#3): DST 2-pass refinement, calendar-day roll across DST, and local vs remote zoneless times", async () => {
+  const { engine, screen } = await loadCore();
+
+  // Exact DST transition dates in America/New_York:
+  // Fall-back: Nov 1, 2026 2:30am is EST (UTC-5) -> 07:30Z (NOT 06:30Z!)
+  assert.equal(
+    screen.parseResetTime("resets Nov 1, 2026 2:30am (America/New_York)", Date.parse("2026-10-31T12:00:00Z")),
+    Date.parse("2026-11-01T07:30:00.000Z"),
+  );
+  // Spring-forward: Mar 8, 2026 3:30am is EDT (UTC-4) -> 07:30Z
+  assert.equal(
+    screen.parseResetTime("resets Mar 8, 2026 3:30am (America/New_York)", Date.parse("2026-03-07T12:00:00Z")),
+    Date.parse("2026-03-08T07:30:00.000Z"),
+  );
+
+  // Dateless time-of-day rolling +1 calendar day across DST transitions (no 1-hour skew from raw +86_400_000ms):
+  // Oct 31, 2026 22:00 EDT (2026-11-01T02:00:00Z) -> "resets 3:30am (America/New_York)" => Nov 1 03:30 EST (08:30Z)
+  assert.equal(
+    screen.parseResetTime("resets 3:30am (America/New_York)", Date.parse("2026-11-01T02:00:00Z")),
+    Date.parse("2026-11-01T08:30:00.000Z"),
+  );
+  // Mar 7, 2026 23:00 EST (2026-03-08T04:00:00Z) -> "resets 4:00am (America/New_York)" => Mar 8 04:00 EDT (08:00Z)
+  assert.equal(
+    screen.parseResetTime("resets 4:00am (America/New_York)", Date.parse("2026-03-08T04:00:00Z")),
+    Date.parse("2026-03-08T08:00:00.000Z"),
+  );
+
+  // Local Codex zoneless "try again at 4:21 PM" parses in host local timezone and fires after local 4:21 PM.
+  const localBefore = new Date(2026, 10, 26, 15, 0, 0, 0).getTime();
+  const expectedLocalReset = new Date(2026, 10, 26, 16, 21, 0, 0).getTime();
+  const banner = "■ You've hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at 4:21 PM.\n› ";
+
+  const localCodex = makeTerminal({
+    address: "t1",
+    turn: 10,
+    program: { key: "codex", name: "Codex", agent: true, shell: false },
+    foreground: { pid: 200, name: "codex" },
+    report: { app: "codex", state: "idle" },
+    labels: {},
+    argv: ["codex"],
+  });
+  const remoteCodex = makeTerminal({
+    address: "linux/t1",
+    turn: 10,
+    program: { key: "codex", name: "Codex", agent: true, shell: false },
+    foreground: { pid: 200, name: "codex" },
+    report: { app: "codex", state: "idle" },
+    labels: {},
+    argv: ["codex"],
+  });
+
+  const h = createHarness({
+    nowMs: localBefore,
+    terminals: [localCodex, remoteCodex],
+    hcHandler: async (args) => {
+      if (args[0] === "read") return { code: 0, stdout: banner, stderr: "" };
+      if (args[0] === "get") return { code: 0, stdout: JSON.stringify(localCodex), stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+  const eng = engine.createEngine(h.env);
+  const st1 = await eng.tick();
+  assert.equal(st1.queue.length, 1, "only local t1 must queue; remote linux/t1 must be ignored");
+  assert.equal(st1.queue[0].address, "t1");
+  assert.equal(st1.queue[0].resetsAtMs, expectedLocalReset);
+
+  // Before local 4:21 PM -> 0 sends
+  h.setNow(expectedLocalReset - 10_000);
+  await eng.tick();
+  assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
+
+  // After local 4:21 PM + delaySec -> sends 1 to local t1 only
+  h.setNow(expectedLocalReset + 61_000);
+  const st2 = await eng.tick();
+  assert.equal(st2.queue.length, 0);
+  assert.equal(st2.history[0].outcome, "resumed");
+  assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
+  assert.equal(h.hcCalls.filter((a) => a[0] === "send")[0][3], "t1");
+});
+
+test("pr19-final (#4): real banners & composer shapes (Claude /extra-usage + footers, Codex Visit URL + follow-up, OpenCode 1.15.x)", async () => {
+  const { engine, screen } = await loadCore();
+  const T0 = Date.parse("2026-11-26T18:00:00Z"); // 1:00pm EST (America/New_York)
+  const expectedNy4pm = Date.parse("2026-11-26T21:00:00Z"); // 4:00pm EST
+  const MIN = 60_000;
+
+  // 4a. Claude /extra-usage (straight & curly apostrophe) + Sautéed + real t2h footers
+  for (const apostrophe of ["'", "’"]) {
+    const claudeScreen = [
+      `You${apostrophe}ve hit your limit · resets 4pm (America/New_York)`,
+      `  /extra-usage to finish what you${apostrophe}re working on.`,
+      "✻ Sautéed for 7m 28s",
+      "────────────────────────────",
+      "❯ ",
+      "────────────────────────────",
+      "new task? /clear to save tokens",
+      "Opus 5.5 v2.1.308 / ctx:17% · $0.42",
+    ].join("\n");
+
+    assert.equal(screen.hasUnsentDraft(claudeScreen), false, `Claude footer chrome must not look like draft (${apostrophe})`);
+    const hit = screen.detectScreenRateLimit({ agent: "claude", address: "t1", text: claudeScreen, nowMs: T0 });
+    assert.ok(hit, `Claude /extra-usage banner must be detected (${apostrophe})`);
+    assert.equal(hit.resetsAtMs, expectedNy4pm);
+
+    // End-to-end engine queues and resumes 1
+    const claudeTerm = makeTerminal({ address: "t1", turn: 10, labels: {} });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [claudeTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: claudeScreen, stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(makeFreshGet({ labels: {} })), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+    h.setNow(expectedNy4pm + 61_000);
+    const st = await eng.tick();
+    assert.equal(st.history[0].outcome, "resumed");
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
+  }
+
+  // Draft typed above the real Claude t2h footers MUST still be detected as draft!
+  const claudeDraftScreen = [
+    "You've hit your limit · resets 4pm (America/New_York)",
+    "  /extra-usage to finish what you’re working on.",
+    "✻ Sautéed for 7m 28s",
+    "❯ wait check the migration",
+    "new task? /clear to save tokens",
+    "Opus 5.5 v2.1.308 / ctx:17% · $0.42",
+  ].join("\n");
+  assert.equal(screen.hasUnsentDraft(claudeDraftScreen), true);
+
+  // 4b. Codex "Visit https://..." tail (straight & curly apostrophe) + "Ask a follow-up question" placeholder
+  const localBefore = new Date(2026, 10, 26, 15, 0, 0, 0).getTime();
+  const expectedLocal421 = new Date(2026, 10, 26, 16, 21, 0, 0).getTime();
+  for (const apostrophe of ["'", "’"]) {
+    const codexScreen = [
+      `■ You${apostrophe}ve hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at 4:21 PM.`,
+      "› Ask a follow-up question",
+    ].join("\n");
+
+    assert.equal(screen.hasUnsentDraft(codexScreen), false, `Codex follow-up placeholder must not look like draft (${apostrophe})`);
+    const hit = screen.detectScreenRateLimit({ agent: "codex", address: "t1", text: codexScreen, nowMs: localBefore });
+    assert.ok(hit, `Codex Visit URL banner must be detected (${apostrophe})`);
+    assert.equal(hit.resetsAtMs, expectedLocal421);
+
+    const codexTerm = makeTerminal({
+      address: "t1",
+      turn: 10,
+      program: { key: "codex", name: "Codex", agent: true, shell: false },
+      foreground: { pid: 200, name: "codex" },
+      report: { app: "codex", state: "idle" },
+      labels: {},
+      argv: ["codex"],
+    });
+    const h = createHarness({
+      nowMs: localBefore,
+      terminals: [codexTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: codexScreen, stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(codexTerm), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+    h.setNow(expectedLocal421 + 61_000);
+    const st = await eng.tick();
+    assert.equal(st.history[0].outcome, "resumed");
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
+  }
+
+  // 4c. OpenCode 1.15.x `┃  Build · ...` / `┃  Build auto · ...` footers & `╹▀▀▀...` border
+  for (const footerLine of [
+    "┃  Build · Claude Sonnet 4.6 Anthropic",
+    "┃  Build auto · Free Models Router OpenRouter",
+  ]) {
+    const ocScreen = [
+      "Rate limit exceeded. Try again in 2m.",
+      '┃  Ask anything... "Fix a TODO in the codebase"',
+      footerLine,
+      "╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+      "tab agents   ctrl+p commands",
+    ].join("\n");
+
+    assert.equal(screen.hasUnsentDraft(ocScreen), false, `OpenCode 1.15.x empty composer must not look like draft: ${footerLine}`);
+    const hit = screen.detectScreenRateLimit({ agent: "opencode", address: "t1", text: ocScreen, nowMs: T0 });
+    assert.ok(hit, `OpenCode 1.15.x banner must be detected: ${footerLine}`);
+    assert.equal(hit.resetsAtMs, T0 + 2 * MIN);
+
+    const ocTerm = makeTerminal({
+      address: "t1",
+      turn: 10,
+      program: { key: "opencode", name: "OpenCode", agent: true, shell: false },
+      foreground: { pid: 300, name: "opencode" },
+      report: { app: "opencode", state: "idle" },
+      labels: {},
+      argv: ["opencode"],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [ocTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: ocScreen, stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(ocTerm), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+    h.setNow(T0 + 4 * MIN);
+    const st = await eng.tick();
+    assert.equal(st.history[0].outcome, "resumed");
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1);
+  }
+
+  // Plain draft above OpenCode 1.15.x footer MUST still block as a draft!
+  {
+    const ocInitial = [
+      "Rate limit exceeded. Try again in 2m.",
+      "┃  ",
+      "┃  Build · Claude Sonnet 4.6 Anthropic",
+      "╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+    ].join("\n");
+    const ocDraft = [
+      "Rate limit exceeded. Try again in 2m.",
+      "┃  Build the production migration",
+      "┃  Build · Claude Sonnet 4.6 Anthropic",
+      "╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+    ].join("\n");
+    assert.equal(screen.hasUnsentDraft(ocDraft), true, "plain draft above OpenCode 1.15.x footer must be detected");
+
+    let curScreen = ocInitial;
+    const ocTerm = makeTerminal({
+      address: "t1",
+      turn: 10,
+      program: { key: "opencode", name: "OpenCode", agent: true, shell: false },
+      foreground: { pid: 300, name: "opencode" },
+      report: { app: "opencode", state: "idle" },
+      labels: {},
+      argv: ["opencode"],
+    });
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [ocTerm],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: curScreen, stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(ocTerm), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+    curScreen = ocDraft;
+    h.setNow(T0 + 4 * MIN);
+    const st = await eng.tick();
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, "OpenCode draft must block send");
+    assert.equal(st.history[0].outcome, "skipped-replied");
+    assert.match(st.history[0].detail, /draft/i);
+  }
+});
+
+test("pr19-final (#5): reads status.msg (raw hc get --json shape without report) on detect and finalGet", async () => {
+  const { engine } = await loadCore();
+  const T0 = Date.parse("2026-11-26T15:00:00Z");
+  const MIN = 60_000;
+
+  assert.equal(
+    engine.terminalStatusMsg({ status: { state: "idle", app: "codex", msg: "  You've hit your usage limit. Try again in 1m.  " } }),
+    "You've hit your usage limit. Try again in 1m.",
+  );
+  assert.equal(
+    engine.terminalStatusMsg({ status: "idle", report: { msg: "Rate limit exceeded" } }),
+    "Rate limit exceeded",
+  );
+  assert.equal(engine.terminalStatusMsg({ status: { state: "idle", msg: "   " } }), null);
+
+  const makeRawCodex = (msg) => ({
+    address: "t1",
+    state: "live",
+    turn: 10,
+    status_ms: 1000,
+    title: "Codex Task",
+    program: { key: "codex", name: "Codex", agent: true, shell: false },
+    foreground: { pid: 200, name: "codex" },
+    status: { state: "idle", app: "codex", msg },
+    labels: {},
+    argv: ["codex"],
+  });
+
+  // 5a. Raw status.msg (no report object) detects, verifies at finalGet, and sends 1.
+  {
+    const termWithStatusMsg = makeRawCodex("You've hit your usage limit. Try again in 1m.");
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [termWithStatusMsg],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "Normal output\n› ", stderr: "" };
+        if (args[0] === "get") return { code: 0, stdout: JSON.stringify(termWithStatusMsg), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1, "raw status.msg must detect and queue");
+
+    h.setNow(T0 + 3 * MIN);
+    const st = await eng.tick();
+    assert.equal(st.queue.length, 0);
+    assert.equal(st.history[0].outcome, "resumed");
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 1, "raw status.msg must verify and send 1");
+  }
+
+  // 5b. Same raw shape when finalGet clears status.msg -> skipped-replied, 0 sends!
+  {
+    let getCount = 0;
+    const termWithStatusMsg = makeRawCodex("You've hit your usage limit. Try again in 1m.");
+    const termCleared = makeRawCodex(null);
+    const h = createHarness({
+      nowMs: T0,
+      terminals: [termWithStatusMsg],
+      hcHandler: async (args) => {
+        if (args[0] === "read") return { code: 0, stdout: "Normal output\n› ", stderr: "" };
+        if (args[0] === "get") {
+          getCount += 1;
+          return {
+            code: 0,
+            stdout: JSON.stringify(getCount === 1 ? termWithStatusMsg : termCleared),
+            stderr: "",
+          };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const eng = engine.createEngine(h.env);
+    await eng.tick();
+    assert.equal(eng.getState().queue.length, 1);
+
+    h.setNow(T0 + 3 * MIN);
+    const st = await eng.tick();
+    assert.equal(st.queue.length, 0);
+    assert.equal(st.history[0].outcome, "skipped-replied");
+    assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0, "cleared status.msg on finalGet must send 0");
   }
 });

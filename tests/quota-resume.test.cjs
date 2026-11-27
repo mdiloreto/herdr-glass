@@ -865,28 +865,17 @@ test("engine: deferred Claude transcript entry still detects reply via error UUI
   assert.equal(h.hcCalls.filter((a) => a[0] === "send").length, 0);
 });
 
-test("layouts: mount quota-resume-daemon right below agent-resume-daemon", () => {
+test("layouts: do not mount quota-resume-daemon", () => {
   const layoutFiles = ["glass.json", "glass-insights.json", "omarchy.json", "omarchy-next.json"];
   for (const name of layoutFiles) {
     const file = path.join(root, "layouts", name);
     const data = JSON.parse(fs.readFileSync(file, "utf8"));
-    let foundPair = false;
     const visit = (node) => {
       if (!node || typeof node !== "object") return;
-      if (Array.isArray(node.children)) {
-        const idx = node.children.findIndex((c) => c?.id === "agent-resume-daemon");
-        if (idx !== -1) {
-          const next = node.children[idx + 1];
-          assert.ok(next, `${name}: missing block after agent-resume-daemon`);
-          assert.equal(next.id, "quota-resume-daemon", `${name}: next block id`);
-          assert.equal(next.content?.mod, "quota-resume", `${name}: next block mod`);
-          assert.deepEqual(next.size, { px: 0 }, `${name}: next block size`);
-          foundPair = true;
-        }
-        node.children.forEach(visit);
-      }
+      assert.notEqual(node.id, "quota-resume-daemon", `${name}: quota-resume-daemon mounted`);
+      assert.notEqual(node.content?.mod, "quota-resume", `${name}: quota-resume mod mounted`);
+      for (const value of Object.values(node)) visit(value);
     };
     visit(data);
-    assert.ok(foundPair, `${name}: did not find agent-resume-daemon + quota-resume-daemon pair`);
   }
 });

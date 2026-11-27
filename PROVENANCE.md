@@ -27,8 +27,11 @@ All Apache-2.0. Line ranges are those of this repository's files and of the upst
 | `mods/goto/name.js` (whole file) | `herdr-t3:mods/t3-picker/name.js` | Pane namer; we put the agent's session label first |
 | `mods/goto/zoom.js` 5-11 | `herdr-t3:mods/t3-picker/zoom.js` | Unzoom before focusing a pane |
 | `mods/goto/main.js` 399-400, 403, 417-419, 427-428 | `herdr-t3:mods/t3-picker/main.js` 100-101, 102, 115-117, 123-124 | Key hints, popup frame, search row, footer |
-| `mods/goto/rows.js` 87, 97 | `herdr-t3:mods/t3-picker/main.js` 75, 92 | Row label for screen readers, Back tag |
-| `mods/goto/rows.js` 46-52 | `herdr-app:defaults/mods/agents/main.js` 211-216 | Status marks |
+| `mods/goto/rows.js` 47-50 | `herdr-t3:mods/t3-picker/main.js` 71 | Blocked mark |
+| `mods/goto/rows.js` 61-62 | `herdr-t3:mods/t3-picker/main.js` 19-20 | Terminal icon and tinted program icon |
+| `mods/goto/rows.js` 87-88, 97 | `herdr-t3:mods/t3-picker/main.js` 74-75, 92 | Row label for screen readers, selection, Back tag |
+| `mods/goto/rows.js` 46 | `herdr-app:defaults/mods/agents/main.js` 211 | Working mark |
+| `mods/goto/rows.js` 51-52 | `herdr-app:defaults/mods/agents/main.js` 215-216 | Idle and done marks |
 | `mods/goto/rows.js` 66-80 | `herdr-app:defaults/frame/palette/main.js` 187-203 | Lit matched letters |
 | `mods/goto/score.js` 17-33 | `herdr-app:defaults/frame/palette/main.js` 113-129 | `fuzzy()`, with `export` added |
 | `mods/tui-goto/main.js` 30-64 | `herdr-app:defaults/mods/picker/main.js` 11-35 | Space colors |
@@ -53,7 +56,7 @@ All Apache-2.0. Line ranges are those of this repository's files and of the upst
 
 ## Icons in `goto`
 
-`mods/goto/icons/git-branch.svg` and `layers.svg` are identical to icons Herdr App ships, and `search.svg` and `terminal.svg` to icons in `herdr-t3`'s picker. All four are [Lucide](https://github.com/lucide-icons/lucide) icons (ISC); Lucide's license is in `LICENSES/nozikov-herdr-usage-limits.lucide.txt`. `home.svg` matched no third-party copy compared.
+`mods/goto/icons/git-branch.svg` and `layers.svg` are identical to icons Herdr App ships, and `search.svg` and `terminal.svg` to icons in `herdr-t3`'s picker. All four are [Lucide](https://github.com/lucide-icons/lucide) icons (ISC; `search.svg` and `terminal.svg` are also on its list of Feather-derived icons, under MIT). Both notices are in `LICENSES/nozikov-herdr-usage-limits.lucide.txt`. `home.svg` matched no third-party copy compared.
 
 ## Forked mods shipped here
 

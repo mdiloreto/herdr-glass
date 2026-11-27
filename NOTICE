@@ -86,14 +86,14 @@ no copyright holder.
 
 Parts of the mods goto, tui-goto and tui-spaces come from its shipped sources,
 compared at v0.1.16. The rest of those mods is under this repository's MIT
-License, except as listed here and for JinJieBeWater/herdr-t3 below.
-PROVENANCE.md gives the line ranges.
+License, except as listed here and under JinJieBeWater/herdr-t3 and Lucide
+below. PROVENANCE.md gives the line ranges.
 
   mods/goto/score.js: the fuzzy() function from defaults/frame/palette/main.js,
   with `export` added.
 
   mods/goto/rows.js: the highlighting of matched letters (from
-  defaults/frame/palette/main.js) and the status marks (from
+  defaults/frame/palette/main.js) and the working, idle and done marks (from
   defaults/mods/agents/main.js), modified by mdiloreto.
 
   mods/tui-goto/main.js and mods/tui-spaces/main.js: blocks from
@@ -113,7 +113,9 @@ Lucide, ISC License (https://lucide.dev)
 
 The icons git-branch.svg, layers.svg, search.svg and terminal.svg in
 mods/goto/icons/ are Lucide icons. Lucide's license is copied verbatim to
-LICENSES/nozikov-herdr-usage-limits.lucide.txt.
+LICENSES/nozikov-herdr-usage-limits.lucide.txt. search.svg and terminal.svg are
+also on that file's list of Feather-derived icons, so its MIT notice applies to
+them too.
 
 --------------------------------------------------------------------------
 herunan/herdr-over9k, MIT License

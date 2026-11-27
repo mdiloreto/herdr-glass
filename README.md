@@ -205,7 +205,7 @@ Much of this pack is other people's work. [`PROVENANCE.md`](./PROVENANCE.md) rec
 | [herunan/herdr-over9k](https://github.com/herunan/herdr-over9k) | Our fork `over9k-prompts` (Timeline) | MIT |
 | [ohneda/herdr-markdown-browser](https://github.com/ohneda/herdr-markdown-browser) | Our fork `markdown-browser` | MIT |
 | [herdrdev/herdr-app](https://github.com/herdrdev/herdr-app) | Our forks `space-folders`, `space-folders-next`; the search scorer, match highlighting and status marks in `goto`, from its command palette and agents list; parts of `tui-goto` and `tui-spaces`, from its picker | Apache-2.0 |
-| [Lucide](https://github.com/lucide-icons/lucide) | Icons in `goto` ([notice](./LICENSES/nozikov-herdr-usage-limits.lucide.txt)) | ISC |
+| [Lucide](https://github.com/lucide-icons/lucide) | Icons in `goto` ([notice](./LICENSES/nozikov-herdr-usage-limits.lucide.txt)) | ISC; MIT for the Feather-derived ones |
 
 ## License
 

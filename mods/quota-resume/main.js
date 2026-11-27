@@ -154,5 +154,8 @@ export default class QuotaResume extends View {
       this.timer.cancel();
       this.timer = null;
     }
+    if (this.engine && typeof this.engine.close === "function") {
+      this.engine.close();
+    }
   }
 }

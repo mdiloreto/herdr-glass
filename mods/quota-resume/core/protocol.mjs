@@ -10,17 +10,21 @@ export const HISTORY_LIMIT = 50;
 export const DEFAULT_DELAY_SEC = 60;
 export const MAX_DELAY_SEC = 3600;
 export const DEFAULT_PROMPT = "The usage limit has reset. Continue from where you left off.";
-export const MAX_HANDLED_FINGERPRINTS = 500;
-export const MAX_PROMOTED_EPISODES = 500;
-export const MAX_EPISODE_ATTEMPTS_KEYS = 500;
-export const MAX_TERMINAL_COOLDOWNS = 200;
+export const MAX_HANDLED_FINGERPRINTS = 200;
+export const MAX_HANDLED_BANNERS = 200;
+export const MAX_PROMOTED_EPISODES = 200;
+export const MAX_EPISODE_ATTEMPTS_KEYS = 200;
+export const MAX_TERMINAL_COOLDOWNS = 100;
+export const MAX_CANCEL_EPOCHS = 100;
+export const MAX_CLAIMS = 100;
+export const CLAIM_TTL_MS = 5 * 60 * 1000; // 5 minutes
 export const MAX_STALE_SEND_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours past resetsAtMs
-export const MAX_QUEUE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours past detectedAtMs
+export const MAX_QUEUE_HARD_AGE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days sanity cap
 export const MAX_RESTORED_ATTEMPTS = 10;
 
 export const SUPPORTED_AGENTS = ["claude", "codex", "opencode"];
 export const VALID_QUEUE_STATUSES = new Set(["waiting", "resuming", "paused"]);
-export const VALID_RESET_SOURCES = new Set(["transcript", "screen", "quota", "fallback"]);
+export const VALID_RESET_SOURCES = new Set(["transcript", "screen", "quota"]);
 export const VALID_OUTCOMES = new Set([
   "resumed",
   "skipped-replied",
@@ -89,7 +93,7 @@ export function isEntryExpired(entry, nowMs = Date.now()) {
   if (!entry || typeof entry !== "object") return true;
   if (!Number.isFinite(entry.resetsAtMs) || !Number.isFinite(entry.detectedAtMs)) return true;
   if (nowMs - entry.resetsAtMs > MAX_STALE_SEND_AGE_MS) return true;
-  if (nowMs - entry.detectedAtMs > MAX_QUEUE_AGE_MS) return true;
+  if (nowMs - entry.detectedAtMs > MAX_QUEUE_HARD_AGE_MS) return true;
   return false;
 }
 
@@ -97,6 +101,7 @@ export function normalizeQueueEntry(raw, nowMs = Date.now()) {
   if (!raw || typeof raw !== "object") return null;
   if (typeof raw.address !== "string" || !raw.address) return null;
   if (!SUPPORTED_AGENTS.includes(raw.agent)) return null;
+  if (raw.resetSource === "fallback") return null;
   if (typeof raw.resetsAtMs !== "number" || !Number.isFinite(raw.resetsAtMs)) return null;
   if (typeof raw.resumeAtMs !== "number" || !Number.isFinite(raw.resumeAtMs)) return null;
   if (typeof raw.errorFingerprint !== "string" || !raw.errorFingerprint) return null;
@@ -105,31 +110,41 @@ export function normalizeQueueEntry(raw, nowMs = Date.now()) {
       ? raw.detectedAtMs
       : nowMs;
   if (nowMs - raw.resetsAtMs > MAX_STALE_SEND_AGE_MS) return null;
-  if (nowMs - detectedAtMs > MAX_QUEUE_AGE_MS) return null;
+  if (nowMs - detectedAtMs > MAX_QUEUE_HARD_AGE_MS) return null;
   const status = VALID_QUEUE_STATUSES.has(raw.status) ? raw.status : "waiting";
   const attempts =
     typeof raw.attempts === "number" && Number.isFinite(raw.attempts) && raw.attempts >= 0
       ? Math.min(Math.floor(raw.attempts), MAX_RESTORED_ATTEMPTS)
       : 0;
+  const sessionId = typeof raw.sessionId === "string" && raw.sessionId ? raw.sessionId : null;
+  const transcriptUuid =
+    raw.agent === "claude" && isUuid(sessionId) && isUuid(raw.transcriptUuid)
+      ? raw.transcriptUuid
+      : null;
+  let resetSource = VALID_RESET_SOURCES.has(raw.resetSource) ? raw.resetSource : "screen";
+  if (resetSource === "transcript" && !transcriptUuid) {
+    resetSource = "screen";
+  }
   return {
     address: raw.address,
     machine: typeof raw.machine === "string" && raw.machine ? raw.machine : machineOf(raw.address),
     agent: raw.agent,
     provider: SUPPORTED_AGENTS.includes(raw.provider) ? raw.provider : raw.agent,
-    sessionId: typeof raw.sessionId === "string" && raw.sessionId ? raw.sessionId : null,
-    transcriptUuid:
-      typeof raw.transcriptUuid === "string" && raw.transcriptUuid ? raw.transcriptUuid : null,
+    sessionId,
+    transcriptUuid,
     title: typeof raw.title === "string" && raw.title ? raw.title : raw.address,
     where: typeof raw.where === "string" && raw.where ? raw.where : null,
     detectedAtMs,
     resetsAtMs: raw.resetsAtMs,
     resumeAtMs: raw.resumeAtMs,
-    resetSource: VALID_RESET_SOURCES.has(raw.resetSource) ? raw.resetSource : "fallback",
+    resetSource,
     reason: typeof raw.reason === "string" && raw.reason ? raw.reason : "rate limit",
     errorTurn: typeof raw.errorTurn === "number" && Number.isFinite(raw.errorTurn) ? raw.errorTurn : null,
     errorFingerprint: raw.errorFingerprint,
     episodeKey: typeof raw.episodeKey === "string" && raw.episodeKey ? raw.episodeKey : null,
     matchedLine: typeof raw.matchedLine === "string" && raw.matchedLine ? raw.matchedLine : null,
+    matchedSnippet:
+      typeof raw.matchedSnippet === "string" && raw.matchedSnippet ? raw.matchedSnippet : null,
     // Reset any stale mid-flight "resuming" entry across restarts back to "waiting"
     status: status === "resuming" ? "waiting" : status,
     attempts,
@@ -188,12 +203,60 @@ function normalizeStringSetList(raw, limit) {
   return out.length > limit ? out.slice(out.length - limit) : out;
 }
 
-function normalizeNumberMap(raw, limit) {
+function normalizeNumberMap(raw, limit, { minValue = 0 } = {}) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const entries = [];
   for (const [k, v] of Object.entries(raw)) {
-    if (!k || typeof v !== "number" || !Number.isFinite(v) || v < 0) continue;
+    if (!k || typeof v !== "number" || !Number.isFinite(v) || v < minValue) continue;
     entries.push([k, v]);
+  }
+  const trimmed = entries.length > limit ? entries.slice(entries.length - limit) : entries;
+  return Object.fromEntries(trimmed);
+}
+
+function normalizeStringMap(raw, limit) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const entries = [];
+  for (const [k, v] of Object.entries(raw)) {
+    if (!k || typeof v !== "string" || !v) continue;
+    entries.push([k, v]);
+  }
+  const trimmed = entries.length > limit ? entries.slice(entries.length - limit) : entries;
+  return Object.fromEntries(trimmed);
+}
+
+function normalizeHandledBanners(raw, limit) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const entries = [];
+  for (const [addr, v] of Object.entries(raw)) {
+    if (!addr || !v || typeof v !== "object") continue;
+    if (typeof v.bannerKey !== "string" || !v.bannerKey) continue;
+    if (typeof v.handledAtMs !== "number" || !Number.isFinite(v.handledAtMs)) continue;
+    entries.push([
+      addr,
+      {
+        bannerKey: v.bannerKey,
+        turn: typeof v.turn === "number" && Number.isFinite(v.turn) ? v.turn : null,
+        resetsAtMs:
+          typeof v.resetsAtMs === "number" && Number.isFinite(v.resetsAtMs) ? v.resetsAtMs : null,
+        handledAtMs: v.handledAtMs,
+        cancelled: Boolean(v.cancelled),
+      },
+    ]);
+  }
+  const trimmed = entries.length > limit ? entries.slice(entries.length - limit) : entries;
+  return Object.fromEntries(trimmed);
+}
+
+function normalizeClaims(raw, limit, nowMs) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const entries = [];
+  for (const [key, v] of Object.entries(raw)) {
+    if (!key || !v || typeof v !== "object") continue;
+    if (typeof v.owner !== "string" || !v.owner) continue;
+    if (typeof v.atMs !== "number" || !Number.isFinite(v.atMs)) continue;
+    if (nowMs - v.atMs > CLAIM_TTL_MS) continue;
+    entries.push([key, { owner: v.owner, atMs: v.atMs }]);
   }
   const trimmed = entries.length > limit ? entries.slice(entries.length - limit) : entries;
   return Object.fromEntries(trimmed);
@@ -209,9 +272,13 @@ export function defaultState(nowMs = Date.now()) {
     queue: [],
     history: [],
     handledFingerprints: [],
+    handledBanners: {},
     promotedEpisodes: [],
     episodeAttempts: {},
     terminalCooldowns: {},
+    cancelEpochs: {},
+    cancelledSignatures: {},
+    claims: {},
   };
 }
 
@@ -238,9 +305,15 @@ export function normalizeState(raw, nowMs = Date.now()) {
     queue,
     history,
     handledFingerprints: normalizeStringSetList(raw.handledFingerprints, MAX_HANDLED_FINGERPRINTS),
+    handledBanners: normalizeHandledBanners(raw.handledBanners, MAX_HANDLED_BANNERS),
     promotedEpisodes: normalizeStringSetList(raw.promotedEpisodes, MAX_PROMOTED_EPISODES),
     episodeAttempts: normalizeNumberMap(raw.episodeAttempts, MAX_EPISODE_ATTEMPTS_KEYS),
-    terminalCooldowns: normalizeNumberMap(raw.terminalCooldowns, MAX_TERMINAL_COOLDOWNS),
+    terminalCooldowns: normalizeNumberMap(raw.terminalCooldowns, MAX_TERMINAL_COOLDOWNS, {
+      minValue: Math.max(0, nowMs - 60 * 60 * 1000),
+    }),
+    cancelEpochs: normalizeNumberMap(raw.cancelEpochs, MAX_CANCEL_EPOCHS),
+    cancelledSignatures: normalizeStringMap(raw.cancelledSignatures, MAX_CANCEL_EPOCHS),
+    claims: normalizeClaims(raw.claims, MAX_CLAIMS, nowMs),
   };
 }
 

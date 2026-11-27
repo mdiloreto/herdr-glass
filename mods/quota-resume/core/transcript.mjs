@@ -136,6 +136,25 @@ export function findActiveQuotaError(entries, nowMs = Date.now(), { maxAgeMs = M
 }
 
 /**
+ * Verifies that `errorUuid` exists in the transcript tail as a genuine quota API error
+ * (`isApiErrorMessage === true` and `extractResetMs(e) != null`) with no subsequent
+ * non-error assistant reply.
+ */
+export function verifyActiveTranscriptError(entries, errorUuid) {
+  if (!Array.isArray(entries) || entries.length === 0) return false;
+  if (typeof errorUuid !== "string" || !errorUuid.trim()) return false;
+  const idx = entries.findIndex((e) => e && e.uuid === errorUuid);
+  if (idx === -1) return false;
+  const errEntry = entries[idx];
+  if (!errEntry.isApiErrorMessage || extractResetMs(errEntry) == null) return false;
+  for (let i = idx + 1; i < entries.length; i++) {
+    const e = entries[i];
+    if (e && e.type === "assistant" && !e.isApiErrorMessage) return false;
+  }
+  return true;
+}
+
+/**
  * Checks whether the Claude session has produced any non-error assistant reply
  * since the error identified by `errorUuid` (or if `errorUuid` fell off the 1 MiB tail).
  */

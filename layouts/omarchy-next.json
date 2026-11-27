@@ -373,16 +373,6 @@
           }
         },
         {
-          "id": "quota-resume-daemon",
-          "type": "block",
-          "content": {
-            "mod": "quota-resume"
-          },
-          "size": {
-            "px": 0
-          }
-        },
-        {
           "id": "goto-daemon",
           "type": "block",
           "size": {

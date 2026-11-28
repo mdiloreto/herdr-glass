@@ -88,7 +88,7 @@ On macOS only critical memory pressure alerts: a busy Mac can sit at "warn" pres
 
 Disk alerts cover every writable local disk, while the Vitals panel shows only `/`. Read-only mounts, network and pseudo filesystems, `tmpfs` (except one mounted at `/tmp`) and overlays other than `/` are left out, and a Mac's APFS system volumes count once, as `/System/Volumes/Data`. For an APFS volume the percentage is its container's, which includes the other volumes in it, so it can be higher than the one `df` shows. A single mount cannot be excluded.
 
-The daemon also publishes each machine's latest CPU, RAM and disk % in Herdr shared state, as `fleet-resources.readings`. The disk is `/`, or on a Mac `/System/Volumes/Data` where there is one. In `glass-insights`, once this computer has another machine added, the bottom bar shows them in a pill next to each machine name.
+The daemon also publishes each machine's latest CPU, RAM and disk % in Herdr shared state, as `fleet-resources.readings`. The disk is `/`, or on a Mac `/System/Volumes/Data` where there is one; a read-only one has no figure. In `glass-insights`, once this computer has another machine added, the bottom bar shows them in a pill next to each machine name where there is room.
 
 The daemon runs read-only commands (`uname`, `/proc` reads, `getconf`, `iostat`, `sysctl`, `vm_stat`, `df`, `mount`, `top`, `ps`) on every connected machine, installs nothing on them and needs no root. Machines that report a system other than Linux or macOS are ignored; one that cannot run `sh` reads as not answering. Alerts exist only while a Herdr App window with `glass` or `glass-insights` is open.
 

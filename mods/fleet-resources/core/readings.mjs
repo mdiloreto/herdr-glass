@@ -32,14 +32,15 @@ const moved = (before, after) =>
 
 /**
  * Whether the `latest` entries differ enough from the `written` ones to be worth
- * a write. A newer observation alone counts now and then, to show the data is live.
+ * a write. A new observation time alone counts now and then, to show the data is
+ * live, whichever way the clock has moved.
  */
 export function worthWriting(written, latest) {
   if (written.length !== latest.length) return true;
   const previous = new Map(written.map((entry) => [entry.route, entry]));
   return latest.some((entry) => {
     const old = previous.get(entry.route);
-    return !old || entry.observedAt - old.observedAt >= HEARTBEAT_SEC
+    return !old || Math.abs(entry.observedAt - old.observedAt) >= HEARTBEAT_SEC
       || METRICS.some((metric) => moved(old[metric], entry[metric]));
   });
 }

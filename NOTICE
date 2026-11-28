@@ -23,9 +23,7 @@ LICENSES/JinJieBeWater-herdr-t3.txt. The upstream has no NOTICE file.
 
 l4ci/herdr-mods: the vitals mod. License in LICENSES/l4ci-herdr-mods.txt. Its
 NOTICE ships inside the mod as mods/vitals/NOTICE and credits the macOS parsers
-and panel design to ozcberkay/herdr-coban, Apache License 2.0. The macOS
-Memory Used formula in mods/fleet-resources/core/sample.mjs comes from that
-mod's stats.js.
+and panel design to ozcberkay/herdr-coban, Apache License 2.0.
 
 --------------------------------------------------------------------------
 Shipped unchanged, MIT License with bundled third-party code
@@ -123,6 +121,12 @@ ananjaemin/herdr-health-watch, MIT License
 
 The hold and recovery state machine in mods/fleet-resources/core/engine.mjs is
 modeled on its mods/health-watch/engine.js. No code is copied.
+
+--------------------------------------------------------------------------
+l4ci/herdr-mods, Apache License 2.0 (LICENSES/l4ci-herdr-mods.txt)
+
+The macOS Memory Used formula in mods/fleet-resources/core/sample.mjs follows
+the one in mods/vitals/stats.js. No code is copied.
 
 --------------------------------------------------------------------------
 Lucide, ISC License (https://lucide.dev)

@@ -1122,14 +1122,25 @@ test("staleAfterSec follows a long interval", async () => {
   }
 });
 
-test("a CPU figure appearing on the second Linux sample is written", async () => {
+test("published figures are whole percentages from 0 to 100", async () => {
+  const { toReading } = await core("readings.mjs");
+  const figures = (cpu, memPct, disk) => {
+    const sample = { os: "Linux", cpu, memPct, disks: [{ mount: "/", pct: disk }] };
+    const { cpuPct, memPct: mem, diskPct } = toReading(sample, 0);
+    return [cpuPct, mem, diskPct];
+  };
+  assert.deepEqual(figures(100 / 3, 68.75, 103), [33, 69, 100]);
+  assert.deepEqual(figures(-4, 100.6, -1), [0, 100, 0]);
+});
+
+test("a figure appearing or disappearing is written at once, however small", async () => {
   const r = await rig();
-  r.hosts.set(null, busyHost());
+  r.hosts.set(null, busyHost(1));
   await r.run(2);
-  assert.deepEqual(r.readings.map((x) => x.machines[0].cpuPct), [null, 95]);
+  assert.deepEqual(r.readings.map((x) => x.machines[0].cpuPct), [null, 1]);
   r.hosts.set(null, linuxOutput({ stat: "unreadable" }));
   await r.run(1);
-  assert.equal(published(r)[0].cpuPct, null);
+  assert.deepEqual(r.readings.map((x) => x.machines[0].cpuPct), [null, 1, null]);
 });
 
 test("readings are written on a move of 3 points or after 60 s, not on jitter", async () => {
@@ -1157,6 +1168,31 @@ test("small moves add up against the written value", async () => {
     await r.run(1);
   }
   assert.deepEqual(r.readings.map((x) => x.machines[0].memPct), [70, 73]);
+});
+
+test("a clock step of 60 s either way writes unchanged figures", async () => {
+  const r = await rig();
+  const at = async (seconds) => {
+    r.clock = seconds * 1000;
+    await r.run(1);
+    return r.readings.length;
+  };
+  assert.equal(await at(600), 1);
+  assert.equal(await at(541), 1);
+  assert.equal(await at(540), 2);
+  assert.equal(await at(599), 2);
+  assert.equal(await at(600), 3);
+  assert.deepEqual(r.readings.map((x) => x.machines[0].observedAt), [600, 540, 600]);
+});
+
+test("one machine replacing another between writes is written", async () => {
+  const r = await rig({
+    machines: [remote("old")], hosts: new Map([["old", linuxOutput()], ["new", linuxOutput()]]),
+  });
+  await r.run(1);
+  r.machines = [remote("new")];
+  await r.run(1);
+  assert.deepEqual(r.readings.map((x) => x.machines.map((e) => e.route)), [[null, "old"], [null, "new"]]);
 });
 
 test("a failed or incomplete sample keeps the previous reading", async () => {
@@ -1225,7 +1261,8 @@ test("a late sample does not bring back a removed or unavailable machine", async
 
 test("a closed daemon publishes nothing", async () => {
   let release;
-  const r = await rig();
+  // A machine has already answered when the daemon closes.
+  const r = await rig({ machines: [remote("box")], hosts: new Map([["box", linuxOutput()]]) });
   r.hosts.set(null, () => new Promise((resolve) => (release = resolve)));
   const pending = r.daemon.tick();
   await new Promise(setImmediate);

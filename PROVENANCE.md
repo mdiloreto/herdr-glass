@@ -10,7 +10,7 @@ Parts of `goto`, `tui-goto`, `tui-prefix` and `tui-spaces` come from third parti
 | --- | --- |
 | `agent-names` | Zero-size daemon syncing agent names. |
 | `agent-resume` | Runtime `${HERDR_CLAUDE_BIN:-claude}` resume daemon (portable, no templates). |
-| `fleet-resources` | Zero-size daemon alerting on CPU, memory and disk spikes and unanswering machines, on every connected machine. Its hold and recovery state machine is modeled on [ananjaemin/herdr-health-watch](https://github.com/ananjaemin/herdr-health-watch) `mods/health-watch/engine.js` at `de41f5a1db48e46af0ae300b1b4cb5488758c601` (MIT, `LICENSES/ananjaemin-herdr-health-watch.txt`); no code is copied. The macOS Memory Used formula in its `core/sample.mjs` comes from `mods/vitals/stats.js` (Apache-2.0, adapted from ozcberkay/herdr-coban; see `mods/vitals/NOTICE`). |
+| `fleet-resources` | Zero-size daemon alerting on CPU, memory and disk spikes and unanswering machines, on every connected machine. Its hold and recovery state machine is modeled on [ananjaemin/herdr-health-watch](https://github.com/ananjaemin/herdr-health-watch) `mods/health-watch/engine.js` at `de41f5a1db48e46af0ae300b1b4cb5488758c601` (MIT, `LICENSES/ananjaemin-herdr-health-watch.txt`); no code is copied. Its macOS Memory Used formula follows `mods/vitals/stats.js` (Apache-2.0, see `mods/vitals/NOTICE`); no code is copied. |
 | `goto` | Workspace/tab jump and move daemon plus overlay. |
 | `quota-resume` | Zero-size daemon detecting rate-limited Claude Code, Codex, and OpenCode sessions on its own machine and resuming them after quota reset. Experimental, off by default. |
 | `tui-goto` | Tree session navigator overlay. |

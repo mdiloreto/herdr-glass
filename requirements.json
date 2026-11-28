@@ -1,7 +1,7 @@
 {
   "$comment": "Programs the pack's mods run. scripts/install.mjs reads this file; tests/requirements.test.cjs fails when a mod runs a program listed in neither programs nor system.",
   "herdrApp": { "minVersion": "0.1.16" },
-  "system": ["cmd", "env", "find", "ls", "mdfind", "open", "osascript", "powershell", "powershell.exe", "ps", "pwd", "pwsh", "rm", "sh", "test", "xdg-open"],
+  "system": ["cmd", "env", "find", "ls", "mdfind", "open", "osascript", "powershell", "powershell.exe", "ps", "pwd", "pwsh", "rm", "sh", "test", "uname", "xdg-open"],
   "programs": {
     "git": {
       "why": "Branch, worktree and change views in most panels.",
@@ -23,9 +23,9 @@
       "install": { "brew": "node", "pacman": "nodejs", "dnf": "nodejs", "hint": "Node.js 22.15 or newer from https://nodejs.org or a version manager such as mise" }
     },
     "python3": {
-      "why": "Prompt timeline parsing.",
+      "why": "Prompt timeline parsing; reading OpenCode's link context for Markdown clicks.",
       "required": true,
-      "mods": ["over9k-prompts"],
+      "mods": ["markdown-browser", "over9k-prompts"],
       "install": { "brew": "python", "pacman": "python", "apt": "python3", "dnf": "python3" }
     },
     "hc": {
@@ -53,6 +53,13 @@
       "os": ["linux"],
       "mods": ["web-browser"],
       "install": { "pacman": "iproute2", "apt": "iproute2", "dnf": "iproute" }
+    },
+    "notify-send": {
+      "why": "Desktop notifications for resource alerts.",
+      "required": false,
+      "os": ["linux"],
+      "mods": ["fleet-resources"],
+      "install": { "pacman": "libnotify", "apt": "libnotify-bin", "dnf": "libnotify" }
     },
     "go": {
       "why": "Builds the branch-pr helper (herdr-pr); needed only until it is built.",

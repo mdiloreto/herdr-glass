@@ -21,6 +21,10 @@ LICENSES/munza-herdr-mods-<commit>.NOTICE.txt, one set per pinned commit.
 JinJieBeWater/herdr-t3: the t3-* mods and the herdr-t3 layout. License in
 LICENSES/JinJieBeWater-herdr-t3.txt. The upstream has no NOTICE file.
 
+l4ci/herdr-mods: the vitals mod. License in LICENSES/l4ci-herdr-mods.txt. Its
+NOTICE ships inside the mod as mods/vitals/NOTICE and credits the macOS parsers
+and panel design to ozcberkay/herdr-coban, Apache License 2.0.
+
 --------------------------------------------------------------------------
 Shipped unchanged, MIT License with bundled third-party code
 
@@ -110,6 +114,13 @@ Parts of the mod goto come from its t3-picker mod, modified by mdiloreto:
 mods/goto/name.js (a changed copy of name.js), mods/goto/zoom.js (adapted from
 zoom.js), and blocks of mods/goto/main.js and mods/goto/rows.js (from
 main.js). PROVENANCE.md gives the line ranges. The upstream has no NOTICE file.
+
+--------------------------------------------------------------------------
+ananjaemin/herdr-health-watch, MIT License
+(LICENSES/ananjaemin-herdr-health-watch.txt)
+
+The hold and recovery state machine in mods/fleet-resources/core/engine.mjs is
+modeled on its mods/health-watch/engine.js. No code is copied.
 
 --------------------------------------------------------------------------
 Lucide, ISC License (https://lucide.dev)

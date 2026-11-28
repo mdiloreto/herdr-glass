@@ -10,6 +10,7 @@ Parts of `goto`, `tui-goto`, `tui-prefix` and `tui-spaces` come from third parti
 | --- | --- |
 | `agent-names` | Zero-size daemon syncing agent names. |
 | `agent-resume` | Runtime `${HERDR_CLAUDE_BIN:-claude}` resume daemon (portable, no templates). |
+| `fleet-resources` | Zero-size daemon alerting on CPU, memory and disk spikes and unanswering machines, on every connected machine. Its hold and recovery state machine is modeled on [ananjaemin/herdr-health-watch](https://github.com/ananjaemin/herdr-health-watch) `mods/health-watch/engine.js` at `de41f5a1db48e46af0ae300b1b4cb5488758c601` (MIT, `LICENSES/ananjaemin-herdr-health-watch.txt`); no code is copied. |
 | `goto` | Workspace/tab jump and move daemon plus overlay. |
 | `quota-resume` | Zero-size daemon detecting rate-limited Claude Code, Codex, and OpenCode sessions on its own machine and resuming them after quota reset. Experimental, off by default. |
 | `tui-goto` | Tree session navigator overlay. |
@@ -70,7 +71,7 @@ The base commit is the closest match found, not a recorded fork point.
 | `better-sidebar-rail` | `munza/herdr-mods:better-sidebar/mods/better-sidebar` | `aa4e6115c70f08b17848d37647ccd4752abe1257` | Apache-2.0 | Added `bot`/`home` icons, fixed agent-to-pane title matching, publishes the agent order, restyled space avatars. |
 | `rail-next` | `munza/herdr-mods:better-sidebar/mods/better-sidebar` | `aa4e6115c70f08b17848d37647ccd4752abe1257` | Apache-2.0 | Same base as `better-sidebar-rail` with further agent-view and avatar changes and a `ring-gap` icon. |
 | `over9k-prompts` | `herunan/herdr-over9k:over9k-timeline/mods/over9k-prompts` | `6c595d3e16d9706026b3bc42c854f83755d8d7e2` | MIT | `mod.json` only: panel placement changed to `none`. |
-| `markdown-browser` | `ohneda/herdr-markdown-browser:mods/markdown-browser` | `bb1f3c76882266837662b2f253a241c3ee94463a` | MIT | Added terminal-mention discovery (`mentions.js`), a quick-picker overlay, and opening files in `preview-plus`. |
+| `markdown-browser` | `ohneda/herdr-markdown-browser:mods/markdown-browser` | `bb1f3c76882266837662b2f253a241c3ee94463a` | MIT | Added terminal-mention discovery (`mentions.js`), a quick-picker overlay, opening files in `preview-plus`, and a Cmd-click link handler (`link.js`) that opens `.md` links in `preview-plus` on this computer and on remote machines. |
 | `preview-plus` | `linziyanleo/herdr-mods:preview-plus/mods/preview-plus` | `9d8e0172da18902b18650951fe3f187e19964334` | MIT; bundles Apache-2.0, EPL-2.0 and BSD-2-Clause components (see `mods/preview-plus/THIRD_PARTY.md`) | The 10 s poll of a remote file reloads it only when its content changed, its read failed or the view shows an error, so the reader keeps their place. |
 | `space-folders` | `herdrdev/herdr-app:defaults/mods/spaces` | `8672b99da5b8e33c0f69a35e7a3e500777f1b8aa` | Apache-2.0 | Added space folders with drag-and-drop, rule-based collection and per-machine storage, and new avatar tints. |
 | `space-folders-next` | `herdrdev/herdr-app:defaults/mods/spaces` | `8672b99da5b8e33c0f69a35e7a3e500777f1b8aa` | Apache-2.0 | `space-folders` plus follow-the-front-space folding, `goto` move requests and tab-drag drops. |
@@ -89,6 +90,7 @@ The base commit is the closest match found, not a recorded fork point.
 | `JinJieBeWater/herdr-t3` | Apache-2.0 | `t3-actions`, `t3-agents`, `t3-chrome`, `t3-home`, `t3-inbox`*, `t3-menu`, `t3-new-menu`, `t3-pane`, `t3-picker`, `t3-spaces`, `t3-tabs` |
 | `nozikov/herdr-usage-limits` | MIT; its panel icons are credited upstream to Lucide (ISC), see `LICENSES/nozikov-herdr-usage-limits.lucide.txt` | `usage-limits`* |
 | `mdiloreto/usage-insights` (fork of `harshcurious/usage-insights`) | MIT | `insights`*, `usage-limits-fleet-canary`* (derived from `nozikov/herdr-usage-limits`, MIT; see its `LICENSE-THIRD-PARTY.md`) |
+| `l4ci/herdr-mods` | Apache-2.0; its panel design and macOS parsers come from `ozcberkay/herdr-coban` (Apache-2.0), see `mods/vitals/NOTICE` | `vitals`* |
 
 `fleet-quota` stays in `dotfiles`.
 

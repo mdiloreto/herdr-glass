@@ -66,6 +66,45 @@ A token dashboard built from Claude Code, Codex, OpenCode, Pi and Antigravity lo
 
 ![Insights tab with token totals and a daily heatmap](docs/images/insights.webp)
 
+### Vitals
+
+In `glass` and `glass-insights`, the Vitals panel shows a card for this computer and each connected machine: CPU, memory, swap, the `/` disk and network, with graphs for CPU, memory and network, and the battery on a Mac. Hover a CPU row for the busiest processes.
+
+### Resource alerts
+
+In `glass` and `glass-insights`, the `fleet-resources` daemon checks this computer and every connected machine every 15 seconds, whether or not any panel is open. It notifies you in Herdr App and on the desktop of the computer you are looking at, so a spike on another machine does not go unseen.
+
+| Alert | Raised when | Cleared when |
+| --- | --- | --- |
+| CPU | 90% or more for 2 minutes | below 75% for 1 minute |
+| Memory, Linux | less than 10% available for 2 minutes | 15% or more available for 1 minute |
+| Memory, macOS | memory pressure critical for 2 minutes | below critical for 1 minute |
+| Disk, each one | 90% full or more for 30 seconds | below 87% for 1 minute |
+| Not answering | no usable sample for 2 minutes, including a machine Herdr marks unavailable | 2 samples in a row succeed |
+
+While the reading stays over the threshold, an alert repeats every 15 minutes (a disk once a day). A repeat, like the first notice, needs the reading to have stayed there for the time in the table, so a single spike sends nothing. A machine that stops answering is announced once per outage. Any alert that clears and returns within the repeat window, including a machine that answers again and goes silent, waits for the window to end. Restarting Herdr App or switching layouts does not repeat a notice sent within that window; after it, a problem that is still there is announced again. When an alert you were told about clears, an in-app notice says it recovered, unless a restart or layout switch came more than a repeat window after the notice. CPU and memory alerts name up to three of the processes using the most CPU, without their arguments; a machine with BusyBox `top` names none.
+
+On macOS only critical memory pressure alerts: a busy Mac can sit at "warn" pressure with its swap nearly full as a matter of course. Swap use is included in memory alerts but never raises one on either system.
+
+Disk alerts cover every writable local disk, while the Vitals panel shows only `/`. Read-only mounts, network and pseudo filesystems, `tmpfs` (except one mounted at `/tmp`) and overlays other than `/` are left out, and a Mac's APFS system volumes count once, as `/System/Volumes/Data`. For an APFS volume the percentage is its container's, which includes the other volumes in it, so it can be higher than the one `df` shows. A single mount cannot be excluded.
+
+The daemon runs read-only commands (`uname`, `/proc` reads, `getconf`, `iostat`, `sysctl`, `df`, `mount`, `top`, `ps`) on every connected machine, installs nothing on them and needs no root. Machines that report a system other than Linux or macOS are ignored; one that cannot run `sh` reads as not answering. Alerts exist only while a Herdr App window with `glass` or `glass-insights` is open.
+
+To change the defaults, add `props` to the `content` of the `fleet-resources-daemon` block in [your own copy of the layout](#customize), for example `"content": { "mod": "fleet-resources", "props": { "cpuPct": 95 } }`. An invalid value falls back to the default.
+
+| Prop | Default | Meaning |
+| --- | --- | --- |
+| `intervalSec` | 15 | Seconds between checks, 5 or more |
+| `cpuPct` | 90 | CPU use that raises an alert |
+| `cpuClearPct` | 75 | CPU use below which it clears; never above `cpuPct` |
+| `memAvailPct` | 10 | Linux: available memory below which it alerts; it clears 5 points higher |
+| `diskPct` | 90 | Disk use that raises an alert; it clears more than 3 points lower |
+| `holdSec` | 120 | How long CPU, memory or silence must last |
+| `repeatMin` | 15 | Minutes between repeats; disks always wait 24 hours |
+| `desktop` | `true` | Also send desktop notifications |
+
+To turn it off, run `herdr-app do layout.hide --id fleet-resources-daemon` with the layout shown, in each layout you use, then restart Herdr App.
+
 ### Go to anything
 
 `ctrl-space space` (or `ctrl-shift-k`) searches agents, panes, tabs and spaces, with a preview of the highlighted terminal.
@@ -145,7 +184,7 @@ To update, run `git -C herdr-glass pull`, then `herdr-glass/scripts/install.sh -
 
 ## Requirements
 
-Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing programs and how to get them. Check `curl` and `sqlite3` yourself, and on Linux also `lsof`, `notify-send` and `setsid`.
+Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing programs and how to get them. Check `curl` and `sqlite3` yourself, and on Linux also `lsof` and `setsid`.
 
 | Program | Used for |
 | --- | --- |
@@ -159,6 +198,7 @@ Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing
 | `terminal-browser` | Web pages, on the machine that opens them. On Linux its installer may ask for extra system libraries |
 | `lsof` on this machine, `ss` on remote Linux machines | The Web panel's port list |
 | `notify-send`, `setsid` | Desktop notifications on Linux |
+| `df`, `mount`, `top`, `ps`, and on macOS `iostat` | Resource alerts and Vitals, on each machine |
 | `curl` | Recap, and terminal-browser's installer |
 | Go | Building the pull request helper once |
 
@@ -202,6 +242,8 @@ Much of this pack is other people's work. [`PROVENANCE.md`](./PROVENANCE.md) rec
 | [nozikov/herdr-usage-limits](https://github.com/nozikov/herdr-usage-limits) | `usage-limits`, whose panel icons upstream credits to [Lucide](https://github.com/lucide-icons/lucide) ([notice](./LICENSES/nozikov-herdr-usage-limits.lucide.txt)) | MIT; icons ISC |
 | [mdiloreto/usage-insights](https://github.com/mdiloreto/usage-insights), a fork of [harshcurious/usage-insights](https://github.com/harshcurious/usage-insights) | `insights`, `usage-limits-fleet-canary` (derived from `nozikov/herdr-usage-limits`, MIT) | MIT |
 | [dougcunha/herdr-mods](https://github.com/dougcunha/herdr-mods) | `ci-dash`, which bundles the ISC `yaml` library ([notice](./mods/ci-dash/yaml.LICENSE)) | MIT and ISC |
+| [l4ci/herdr-mods](https://github.com/l4ci/herdr-mods) | `vitals`, whose panel design and macOS parsers come from [ozcberkay/herdr-coban](https://github.com/ozcberkay/herdr-coban) ([notice](./mods/vitals/NOTICE)) | Apache-2.0 |
+| [ananjaemin/herdr-health-watch](https://github.com/ananjaemin/herdr-health-watch) | The model for the hold and recovery rules in `fleet-resources`; no code copied | MIT |
 | [mrolafsson/herdr-recap](https://github.com/mrolafsson/herdr-recap) | `recap` | MIT |
 | [herunan/herdr-over9k](https://github.com/herunan/herdr-over9k) | Our fork `over9k-prompts` (Timeline) | MIT |
 | [ohneda/herdr-markdown-browser](https://github.com/ohneda/herdr-markdown-browser) | Our fork `markdown-browser` | MIT |

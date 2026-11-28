@@ -86,6 +86,8 @@ function install(overrides = {}) {
     hcCalls: [],
     hcHandler: null,
     execHandler: null,
+    machines: [],
+    terminals: [],
     ...overrides,
   };
   globalThis.__herdr = {
@@ -93,6 +95,8 @@ function install(overrides = {}) {
     theme: () => COLORS,
     spaces: () => state.spaces,
     panes: () => state.panes,
+    machines: () => state.machines,
+    terminals: () => state.terminals,
     focused: () => state.focused,
     home: () => "/home/tester",
     window: () => ({ platform: "linux" }),
@@ -139,7 +143,7 @@ function install(overrides = {}) {
   return state;
 }
 
-let Mod, Mentions, root;
+let Mod, Mentions, Link, handleLink, root;
 before(async () => {
   globalThis.__kit = {
     View: class {},
@@ -181,7 +185,7 @@ before(async () => {
     ].join("\n"),
     herdr: [
       "props", "readTextFile", "watchFolder", "theme", "spaces", "panes", "focused", "run",
-      "notify", "openOverlay", "closeOverlay", "nextCommand", "shared", "setShared", "home", "exec", "hc", "window",
+      "notify", "openOverlay", "closeOverlay", "nextCommand", "shared", "setShared", "home", "exec", "hc", "window", "machines", "terminals",
     ].map((name) => `export const ${name} = (...args) => globalThis.__herdr.${name}(...args);`).join("\n"),
   };
   for (const [name, content] of Object.entries(packages)) {
@@ -192,11 +196,13 @@ before(async () => {
   }
   const target = path.join(root, "mod");
   await fs.mkdir(target);
-  for (const file of ["main.js", "list.js", "open.js", "mentions.js"]) {
+  for (const file of ["main.js", "list.js", "open.js", "mentions.js", "link.js"]) {
     await fs.copyFile(path.join(sourceMod, file), path.join(target, file));
   }
   Mod = (await import(pathToFileURL(path.join(target, "main.js")))).default;
   Mentions = await import(pathToFileURL(path.join(target, "mentions.js")));
+  Link = await import(pathToFileURL(path.join(target, "link.js")));
+  handleLink = Link.handleLink;
 });
 after(async () => { if (root) await fs.rm(root, { recursive: true, force: true }); });
 
@@ -648,4 +654,93 @@ test("terminalMentions POSIX sh sidecar reader and verifier resolve real files i
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
+});
+
+test("handleLink opens an absolute markdown file on a remote machine", async () => {
+  const state = install({
+    panes: [{ pane: "pane-term", tab: "tab-1", terminal: "term-1", cwd: "/tmp/x", focused: true }],
+    focused: { tab: "tab-1", pane: "pane-term", cwd: "/tmp/x" },
+    machines: [{ name: "linux", layout: "ready" }],
+  });
+  const link = { kind: "file", raw: "/tmp/x/a.md", path: null };
+  const source = { cwd: "/tmp/x", machine: "linux", pane: "pane-term", tab: "tab-1", space: "space-1", terminal: "term-1" };
+  const result = await handleLink({ link, source });
+  assert.equal(result, "handled");
+  assert.deepEqual(state.runs, [{
+    action: "pane.split",
+    payload: {
+      direction: "right",
+      pane: "pane-term",
+      mod: "preview-plus",
+      props: { file: "/tmp/x/a.md", root: "/tmp/x", on: "linux", space: "space-1" },
+    },
+  }]);
+});
+
+test("handleLink resolves a relative markdown path on a remote machine", async () => {
+  const state = install({
+    panes: [{ pane: "pane-term", tab: "tab-1", terminal: "term-1", cwd: "/tmp/x", focused: true }],
+    focused: { tab: "tab-1", pane: "pane-term", cwd: "/tmp/x" },
+    machines: [{ name: "linux", layout: "ready" }],
+  });
+  const link = { kind: "file", raw: "docs/b.md", path: null };
+  const source = { cwd: "/tmp/x", machine: "linux", pane: "pane-term", tab: "tab-1", space: "space-1", terminal: "term-1" };
+  const result = await handleLink({ link, source });
+  assert.equal(result, "handled");
+  assert.deepEqual(state.runs, [{
+    action: "pane.split",
+    payload: {
+      direction: "right",
+      pane: "pane-term",
+      mod: "preview-plus",
+      props: { file: "/tmp/x/docs/b.md", root: "/tmp/x", on: "linux", space: "space-1" },
+    },
+  }]);
+});
+
+test("handleLink resolves relative markdown without OpenCode context and posts no warning", async () => {
+  const state = install({
+    panes: [{ pane: "pane-term", tab: "tab-1", terminal: "term-1", cwd: "/tmp/x", focused: true }],
+    focused: { tab: "tab-1", pane: "pane-term", cwd: "/tmp/x" },
+    terminals: [{ address: "term-1", state: "live", foreground: { name: "opencode", argv: ["opencode"] } }],
+  });
+  const link = { kind: "file", raw: "docs/b.md", path: null };
+  const source = { cwd: "/tmp/x", machine: null, pane: "pane-term", tab: "tab-1", space: "space-1", terminal: "term-1" };
+  const result = await handleLink({ link, source });
+  assert.equal(result, "handled");
+  assert.deepEqual(state.runs, [{
+    action: "pane.split",
+    payload: {
+      direction: "right",
+      pane: "pane-term",
+      mod: "preview-plus",
+      props: { file: "/tmp/x/docs/b.md", root: "/tmp/x", on: null, space: "space-1" },
+    },
+  }]);
+  assert.deepEqual(state.notifications, []);
+});
+
+test("handleLink warns and opens nothing when the OpenCode link context label is unusable", async () => {
+  const state = install({
+    panes: [{ pane: "pane-term", tab: "tab-1", terminal: "term-1", cwd: "/tmp/x", focused: true }],
+    focused: { tab: "tab-1", pane: "pane-term", cwd: "/tmp/x" },
+    terminals: [{ address: "term-1", state: "live", labels: { "opencode.link-context": "{}" }, foreground: { name: "opencode", argv: ["opencode"] } }],
+  });
+  const link = { kind: "file", raw: "docs/b.md", path: null };
+  const source = { cwd: "/tmp/x", machine: null, pane: "pane-term", tab: "tab-1", space: "space-1", terminal: "term-1" };
+  assert.equal(await handleLink({ link, source }), "handled");
+  assert.deepEqual(state.runs, []);
+  assert.equal(state.notifications[0]?.title, "OpenCode link context unavailable");
+});
+
+test("handleLink passes through non-markdown files", async () => {
+  const state = install({
+    panes: [{ pane: "pane-term", tab: "tab-1", terminal: "term-1", cwd: "/tmp/x", focused: true }],
+    focused: { tab: "tab-1", pane: "pane-term", cwd: "/tmp/x" },
+  });
+  const link = { kind: "file", raw: "notes.txt", path: null };
+  const source = { cwd: "/tmp/x", machine: null, pane: "pane-term", tab: "tab-1", space: "space-1", terminal: "term-1" };
+  const result = await handleLink({ link, source });
+  assert.equal(result, "pass");
+  assert.deepEqual(state.runs, []);
 });

@@ -211,6 +211,18 @@
                       }
                     },
                     {
+                      "id": "vitals",
+                      "label": "Vitals",
+                      "icon": "mods/vitals/vitals.svg",
+                      "group": "panels",
+                      "action": {
+                        "type": "panel",
+                        "container": "panel",
+                        "stack": "panel-body",
+                        "target": "vitals"
+                      }
+                    },
+                    {
                       "id": "insights",
                       "label": "Insights",
                       "icon": "mods/insights/insights.svg",
@@ -336,6 +348,13 @@
                       "content": {
                         "mod": "over9k-prompts"
                       }
+                    },
+                    {
+                      "id": "vitals",
+                      "type": "block",
+                      "content": {
+                        "mod": "vitals"
+                      }
                     }
                   ],
                   "active": "pull-requests"
@@ -413,6 +432,16 @@
           "type": "block",
           "content": {
             "mod": "quota-resume"
+          },
+          "size": {
+            "px": 0
+          }
+        },
+        {
+          "id": "fleet-resources-daemon",
+          "type": "block",
+          "content": {
+            "mod": "fleet-resources"
           },
           "size": {
             "px": 0

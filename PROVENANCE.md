@@ -103,4 +103,6 @@ The base commit is the closest match found, not a recorded fork point.
 | `herdr-t3` | Third-party, shipped unchanged from `JinJieBeWater/herdr-t3` (`vendor.json`). |
 | `workspace` | Third-party, shipped unchanged from `tahadx/workspace` (`vendor.json`). |
 
+`preview-plus` carries its own `version` in `mod.json`, and `glass-insights` at the layout root (not `cloned_from.version`, which Herdr writes); bump it in every release that changes that mod or layout. For `preview-plus` it is upstream's version (`1.0.0`, as upstream has none) with the patch raised once to mark the fork, plus `-glass.<n>`: later changes raise only `n`, and a new upstream version raises the patch again on it and restarts `n` at 1.
+
 `omarchy.json` came from a `dotfiles` template; this is its Linux and macOS rendering, which includes the `fleet-quota` block.

@@ -1,5 +1,6 @@
 {
   "id": "root",
+  "version": "1.0.0",
   "link_handlers": [
     "markdown-browser",
     "web-browser"

@@ -103,4 +103,6 @@ The base commit is the closest match found, not a recorded fork point.
 | `herdr-t3` | Third-party, shipped unchanged from `JinJieBeWater/herdr-t3` (`vendor.json`). |
 | `workspace` | Third-party, shipped unchanged from `tahadx/workspace` (`vendor.json`). |
 
+`preview-plus` and `glass-insights` carry their own `version` (in `mod.json`, at the layout root); bump it when that file's behavior changes. A forked mod's version is the upstream version plus `-glass.<n>`, counting an unversioned upstream as `1.0.0`.
+
 `omarchy.json` came from a `dotfiles` template; this is its Linux and macOS rendering, which includes the `fleet-quota` block.

@@ -51,7 +51,8 @@
                   "content": {
                     "mod": "rail-next",
                     "props": {
-                      "view": "agents"
+                      "view": "agents",
+                      "showDrafts": true
                     }
                   },
                   "size": {

@@ -7,6 +7,10 @@ import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import {
   agents,
+  checking,
+  hc,
+  machines,
+  props,
   terminals,
   panes,
   focused,
@@ -23,6 +27,7 @@ import {
 } from "herdr";
 import { findNode } from "./find-node.js";
 import { TEXT, Icon, IconButton, GroupHeader, Menu, MenuLabel, MenuOption } from "./ui.js";
+import { createDraftMonitor, idleRingColor, promoteDrafts } from "./agent-drafts.mjs";
 
 // The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
 const narrow = () => (findNode(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
@@ -60,7 +65,7 @@ function title(tab, l) {
     live.toLowerCase() !== l?.program?.key;
   return tab.name === prog && telling ? live : tab.name;
 }
-const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
+const RANK = { blocked: 4, done: 3, working: 2, draft: 1.5, idle: 1 };
 // A sub-agent without a pane isn't in agents(): its raw word, error counting as
 // blocked. It's never done: it reports to its parent, and the parent's done is the news.
 const kidStatus = (k, listed) => {
@@ -74,7 +79,7 @@ const SORTS = [
   { id: "prefix", label: "Grouped by prefix", icon: "tag" },
 ];
 const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[0];
-const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
+const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1.5: "Drafts", 1: "Idle" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
 
 // PR-12, INS-4 and PLAT-work, also after a folder such as feature/INS-4: capitals
@@ -158,7 +163,7 @@ function agentDetails(list, label) {
 }
 
 // Same group next to each other, so the list reads, and next-agent keys move, in order.
-function gatherGroups(list, groupOf, sortId) {
+function gatherGroups(list, groupOf, sortId, drafts) {
   const gathered = new Map();
   for (const a of list) {
     const { id } = groupOf(a);
@@ -167,7 +172,7 @@ function gatherGroups(list, groupOf, sortId) {
   const ids = [...gathered.keys()];
   if (sortId === "prefix")
     ids.sort((x, y) => (x === "prefix-none") - (y === "prefix-none") || x.localeCompare(y));
-  return ids.flatMap((id) => gathered.get(id));
+  return ids.flatMap((id) => promoteDrafts(gathered.get(id), drafts));
 }
 
 export class Agents {
@@ -178,7 +183,25 @@ export class Agents {
     // Each agent's last state and when it changed (ms), kept across restarts.
     this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}");
     this.pins = JSON.parse(localStorage.getItem("pins") ?? "[]");
+    this.showDrafts = props()?.showDrafts === true;
     cx.timer.every(30000, (cx) => cx.notify());
+    if (!checking() && this.showDrafts) {
+      this.drafts = createDraftMonitor(
+        () => {
+          const offline = new Set(machines().filter((m) => m.layout === "unavailable").map((m) => m.name));
+          return agents().filter(({ address }) => {
+            const machine = address.includes("/") ? address.split("/")[0] : null;
+            return !offline.has(machine);
+          });
+        },
+        (address) => hc(["read", address, "--json", "--lines", "0"]),
+      );
+      const refresh = (cx) => cx.spawn(async (cx) => {
+        await this.drafts.refresh(() => cx.notify());
+      });
+      this.draftTimer = cx.timer.every(2500, refresh);
+      refresh(cx);
+    }
     // localStorage is per mod, so a copy starts empty: take the original's pins and stamps once.
     if (localStorage.getItem("changed") == null && localStorage.getItem("pins") == null)
       cx.spawn(async (cx) => {
@@ -198,6 +221,11 @@ export class Agents {
           console.log("rail-next: no state to carry over", e);
         }
       });
+  }
+
+  close() {
+    this.draftTimer?.cancel();
+    this.drafts?.close();
   }
 
   // Stamps agents whose state changed. Done and idle count as one: looking at a
@@ -250,7 +278,8 @@ export class Agents {
   rank(a) {
     const sawDone =
       a.address === this.held?.address && this.held.rank === RANK.done && a.status === "idle";
-    return sawDone ? RANK.done : (RANK[a.status] ?? 0);
+    if (sawDone) return RANK.done;
+    return this.draftAddresses.has(a.address) ? RANK.draft : (RANK[a.status] ?? 0);
   }
 
   sortOptions() {
@@ -329,6 +358,7 @@ export class Agents {
       .items_center()
       .text_size(12.5)
       .when(on, (el) => el.bg(t.raised))
+      .when(this.draftAddresses.has(k.address), (el) => el.tooltip("Unsent draft"))
       .hover((s) => s.bg(t.hover))
       .on_click(() => this.openSub(k))
       .children(
@@ -352,7 +382,7 @@ export class Agents {
           .text_color(on ? t.foreground : t.muted)
           .child(k.name || k.template || k.program?.name || k.address),
       )
-      .child(this.status(t, { status: st }, compact));
+      .child(this.status(t, { status: st, address: k.address }, compact));
   }
 
   // compact: a ! for blocked where a header already says "Needs you".
@@ -394,7 +424,7 @@ export class Agents {
         .flex_none()
         .rounded(4)
         .border(1.5)
-        .border_color(t.idle ?? t.dim);
+        .border_color(idleRingColor(t, this.showDrafts, this.draftAddresses.has(a.address), t.idle ?? t.dim));
     return div()
       .size(7)
       .mx(3)
@@ -450,6 +480,7 @@ export class Agents {
     const all = terminals();
     const now = Date.now();
     const unordered = agents();
+    this.draftAddresses = new Set(unordered.filter((a) => this.drafts?.has(a)).map((a) => a.address));
     this.listed = new Map(unordered.map((a) => [a.address, a.status]));
     this.track(unordered, now);
     this.hold(unordered);
@@ -466,7 +497,7 @@ export class Agents {
 
     const label = agentLabel();
     const groupOf = grouping(sort.id, label);
-    const rest = groupOf ? gatherGroups(unpinned, groupOf, sort.id) : unpinned;
+    const rest = groupOf ? gatherGroups(unpinned, groupOf, sort.id, this.draftAddresses) : unpinned;
     const list = [...pinned, ...rest];
     return {
       sort,
@@ -630,7 +661,11 @@ export class Agents {
   railSubRow(s, t, view, last) {
     const k = s.t;
     const st = kidStatus(k, this.listed);
-    const ring = { working: t.working + "40", blocked: t.blocked }[st] ?? t.border;
+    const draft = this.draftAddresses.has(k.address);
+    const label = k.name || k.template || k.program?.name || k.address;
+    const ring = st === "idle"
+      ? idleRingColor(t, this.showDrafts, draft, t.border)
+      : ({ working: t.working + "40", blocked: t.blocked }[st] ?? t.border);
     const mark = icon(k.program, 10, k.program?.color ?? t.foreground);
     return h_flex()
       .id(`rail-sub-${k.address}`)
@@ -638,7 +673,7 @@ export class Agents {
       .flex_none()
       .justify_center()
       .when(k.address === view.shown, (el) => el.bg(t.selected))
-      .tooltip(k.name || k.template || k.program?.name || k.address)
+      .tooltip(draft ? label + " · Draft" : label)
       .hover((el) => el.bg(t.hover))
       .on_click(() => this.openSub(k))
       .child(
@@ -671,7 +706,7 @@ export class Agents {
               .bg(t.surface)
               .border(1.5)
               .border_color(ring)
-              .when(st === "idle", (el) => el.opacity(0.6))
+              .when(st === "idle" && !this.showDrafts, (el) => el.opacity(0.6))
               .flex()
               .items_center()
               .justify_center()
@@ -704,7 +739,7 @@ export class Agents {
             .rounded_r(2),
         ),
       )
-      .tooltip(view.label(a))
+      .tooltip(this.draftAddresses.has(a.address) ? view.label(a) + " · Draft" : view.label(a))
       .hover((s) => s.bg(t.hover))
       .on_click(() => run("pane.focus", { pane: a.pane }))
       .child(this.tile(a, i, t));
@@ -713,7 +748,9 @@ export class Agents {
   // The agent's icon on a round tile whose ring is its status, and its number
   // as a badge on the tile's corner.
   tile(a, i, t) {
-    const ring = { working: t.working, blocked: t.blocked, done: t.done }[a.status] ?? t.border;
+    const ring = a.status === "idle"
+      ? idleRingColor(t, this.showDrafts, this.draftAddresses.has(a.address), t.border)
+      : ({ working: t.working + "40", blocked: t.blocked, done: t.done }[a.status] ?? t.border);
     const p = a.program;
     const mark = icon(p, 14, p?.color ?? t.foreground);
     return div()
@@ -729,8 +766,8 @@ export class Agents {
           .rounded_full()
           .bg(t.surface)
           .border(2)
-          .border_color(a.status === "working" ? t.working + "40" : ring)
-          .when(a.status === "idle", (el) => el.opacity(0.6))
+          .border_color(ring)
+          .when(a.status === "idle" && !this.showDrafts, (el) => el.opacity(0.6))
           .flex()
           .items_center()
           .justify_center()
@@ -791,6 +828,7 @@ export class Agents {
       .items_center()
       .gap(10)
       .when(a.focused, (el) => el.bg(t.selected))
+      .when(this.draftAddresses.has(a.address), (el) => el.tooltip("Unsent draft"))
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_hover((on, cx) => {

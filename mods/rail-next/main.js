@@ -19,4 +19,8 @@ export default class BetterSidebar extends View {
   render(cx) {
     return this.part.render(cx);
   }
+
+  close() {
+    this.part.close?.();
+  }
 }

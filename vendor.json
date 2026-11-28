@@ -89,7 +89,7 @@
   },
   {
     "repo": "mdiloreto/usage-insights",
-    "commit": "2204f06cb7c477b3c343d9e4c76c7e24f1841af8",
+    "commit": "4d96f480d5e3df86a5c41cf28a6272fb830f4736",
     "license": "MIT",
     "paths": {
       "mods/insights": "mods/insights",

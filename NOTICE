@@ -123,6 +123,12 @@ The hold and recovery state machine in mods/fleet-resources/core/engine.mjs is
 modeled on its mods/health-watch/engine.js. No code is copied.
 
 --------------------------------------------------------------------------
+l4ci/herdr-mods, Apache License 2.0 (LICENSES/l4ci-herdr-mods.txt)
+
+The macOS Memory Used formula in mods/fleet-resources/core/sample.mjs follows
+the one in mods/vitals/stats.js. No code is copied.
+
+--------------------------------------------------------------------------
 Lucide, ISC License (https://lucide.dev)
 
 The icons git-branch.svg, layers.svg, search.svg and terminal.svg in

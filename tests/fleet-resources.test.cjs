@@ -102,7 +102,21 @@ const MAC_MOUNT = [
   "map auto_home on /System/Volumes/Data/home (autofs, automounted, nobrowse)",
 ];
 
-function macOutput({ pressure = 2, df = MAC_DF, mount = MAC_MOUNT } = {}) {
+// Invented figures: "Memory Used" is 400000 - 100000 + 150000 + 50000 pages of
+// the 1000000 in physical memory.
+const MAC_VM = [
+  "Mach Virtual Memory Statistics: (page size of 16384 bytes)",
+  "Pages free:                              200000.",
+  "Pages active:                            300000.",
+  "Pages wired down:                        150000.",
+  "Pages purgeable:                         100000.",
+  "Anonymous pages:                         400000.",
+  "Pages stored in compressor:              120000.",
+  "Pages occupied by compressor:             50000.",
+];
+const MAC_MEMSIZE = 1000000 * 16384;
+
+function macOutput({ pressure = 2, df = MAC_DF, mount = MAC_MOUNT, vm = MAC_VM, memsize = MAC_MEMSIZE } = {}) {
   return [
     "@os", "Darwin",
     "@cpu",
@@ -113,6 +127,8 @@ function macOutput({ pressure = 2, df = MAC_DF, mount = MAC_MOUNT } = {}) {
     "@cores", "8",
     "@load", "{ 2.00 2.50 3.00 }",
     "@mem", String(pressure), "total = 8192.00M  used = 7168.00M  free = 1024.00M  (encrypted)",
+    "@vm", ...vm,
+    "@memsize", String(memsize),
     "@df", ...df,
     "@mount", ...mount,
     "@end", "",
@@ -144,6 +160,7 @@ test("parses a Linux sample", async () => {
   assert.equal(sample.cores, 16);
   assert.equal(sample.load, 4.5);
   assert.equal(sample.memAvailPct, 25);
+  assert.equal(sample.memPct, 75);
   assert.equal(sample.pressure, null);
   assert.deepEqual(sample.swap, { used: 1 * GIB, total: 4 * GIB });
   assert.deepEqual(sample.disks, [{ mount: "/", pct: 50, freeKb: 500000 }]);
@@ -158,6 +175,7 @@ test("parses a macOS sample: second iostat row, pressure, swap, one real disk", 
   assert.equal(sample.load, 2);
   assert.equal(sample.pressure, 2);
   assert.equal(sample.memAvailPct, null);
+  assert.equal(sample.memPct, 50);
   assert.deepEqual(sample.swap, { used: 7 * GIB, total: 8 * GIB });
   assert.deepEqual(sample.disks, [{ mount: "/System/Volumes/Data", pct: 40, freeKb: 300000000 }]);
 });
@@ -222,11 +240,43 @@ test("rejects incomplete output and leaves unreadable metrics unknown", async ()
   assert.equal(parseSample(""), null);
   const bare = parseSample("@os\nDarwin\n@cpu\n@mem\n@df\n@mount\n@end\n");
   assert.deepEqual(
-    [bare.cpu, bare.pressure, bare.swap, bare.load, bare.cores, bare.disks],
-    [null, null, null, null, null, []],
+    [bare.cpu, bare.memPct, bare.pressure, bare.swap, bare.load, bare.cores, bare.disks],
+    [null, null, null, null, null, null, []],
   );
   const linux = parseSample("@os\nLinux\n@end\n");
-  assert.deepEqual([linux.counters, linux.memAvailPct, linux.swap], [null, null, null]);
+  assert.deepEqual([linux.counters, linux.memAvailPct, linux.memPct, linux.swap], [null, null, null, null]);
+});
+
+test("macOS memory use is unknown when any figure it needs is missing", async () => {
+  const { parseSample } = await core("sample.mjs");
+  for (const label of ["page size of", "Anonymous pages", "Pages purgeable", "Pages wired down",
+    "Pages occupied by compressor"]) {
+    const vm = MAC_VM.filter((line) => !line.includes(label));
+    assert.equal(vm.length, MAC_VM.length - 1, label);
+    assert.equal(parseSample(macOutput({ vm })).memPct, null, label);
+  }
+  for (const memsize of ["", 0, "unknown"]) {
+    assert.equal(parseSample(macOutput({ memsize })).memPct, null, `memsize ${memsize}`);
+  }
+});
+
+test("publishes the use of / on Linux and of the data volume, else /, on macOS", async () => {
+  const { parseSample } = await core("sample.mjs");
+  const { toReading } = await core("readings.mjs");
+  const diskPct = (output) => toReading(parseSample(output), 0).diskPct;
+  const linux = (...mounts) => linuxOutput({
+    df: mounts.map(([mount, pct], i) => `/dev/sd${i} 1000 500 500 ${pct}% ${mount}`),
+    mount: mounts.map(([mount], i) => `/dev/sd${i} on ${mount} type ext4 (rw)`),
+  });
+  assert.equal(diskPct(linux(["/data", 99], ["/", 41])), 41);
+  assert.equal(diskPct(linux(["/data", 99])), null);
+  const mac = (...mounts) => macOutput({
+    df: mounts.map(([mount, pct], i) => `/dev/disk${i} 1000 500 500 ${pct}% ${mount}`),
+    mount: mounts.map(([mount], i) => `/dev/disk${i} on ${mount} (hfs, local)`),
+  });
+  assert.equal(diskPct(mac(["/", 12], ["/System/Volumes/Data", 63])), 63);
+  assert.equal(diskPct(mac(["/Volumes/usb", 99], ["/", 12])), 12);
+  assert.equal(diskPct(mac(["/Volumes/usb", 99])), null);
 });
 
 test("filters Linux disks", async () => {
@@ -302,6 +352,7 @@ test("the real sample script produces a complete sample here", { skip: !realOs }
   assert.ok(sample.cores >= 1);
   assert.equal(typeof sample.load, "number");
   assert.ok(sample.swap.total >= sample.swap.used);
+  assert.ok(sample.memPct > 0 && sample.memPct <= 100);
   if (realOs === "Linux") {
     assert.ok(sample.counters.total > sample.counters.idle);
     assert.ok(sample.memAvailPct > 0 && sample.memAvailPct <= 100);
@@ -660,10 +711,11 @@ test("unusable saved state is ignored", async () => {
 async function rig({
   props, hosts = new Map(), machines = [], store = new Map(), desktop, processes, platform, clock = 0,
 } = {}) {
-  const { createDaemon } = await core("daemon.mjs");
+  const { createDaemon, STATE_KEY, READINGS_KEY } = await core("daemon.mjs");
   const { readConfig } = await core("engine.mjs");
   const { SAMPLE_SCRIPT } = await core("sample.mjs");
-  const r = { clock, calls: [], notes: [], writes: [], logs: [], machines, hosts, store };
+  // `writes` holds the alert state's writes, `readings` the published figures'.
+  const r = { clock, calls: [], notes: [], writes: [], readings: [], logs: [], machines, hosts, store };
   if (!hosts.has(null)) hosts.set(null, linuxOutput());
   const exec = async (program, args, options) => {
     r.calls.push({ program, args, options });
@@ -679,7 +731,7 @@ async function rig({
     notify: (n) => r.notes.push(n),
     shared: (key) => r.store.get(key),
     setShared: (key, value) => {
-      r.writes.push(value);
+      ({ [STATE_KEY]: r.writes, [READINGS_KEY]: r.readings })[key].push(value);
       r.store.set(key, value);
     },
     now: () => r.clock,
@@ -1037,6 +1089,188 @@ test("a closed daemon sends and writes nothing", async () => {
   assert.deepEqual(r.notes, []);
   assert.deepEqual(r.writes, []);
   assert.equal(r.samples(null).length, 9);
+});
+
+// ---- readings --------------------------------------------------------------
+
+const published = (r) => r.readings.at(-1)?.machines;
+const routes = (r) => published(r)?.map((entry) => entry.route);
+// Linux memory use in whole percent, out of the fixture's total.
+const memAt = (pct) => linuxOutput({ available: (100 - pct) * 320000 });
+
+test("publishes this computer's and a machine's latest figures in one write", async () => {
+  const { READINGS_KEY } = await core("daemon.mjs");
+  assert.equal(READINGS_KEY, "fleet-resources.readings");
+  const r = await rig({ clock: 1_000_900, machines: [remote("mac")], hosts: new Map([["mac", macOutput()]]) });
+  await r.run(1);
+  assert.deepEqual(r.readings, [{
+    version: 1,
+    staleAfterSec: 180,
+    machines: [
+      { route: null, cpuPct: null, memPct: 75, diskPct: 50, observedAt: 1000 },
+      { route: "mac", cpuPct: 40, memPct: 50, diskPct: 40, observedAt: 1000 },
+    ],
+  }]);
+  assert.deepEqual(r.store.get(READINGS_KEY), r.readings[0]);
+});
+
+test("staleAfterSec follows a long interval", async () => {
+  for (const [intervalSec, expected] of [[5, 180], [60, 180], [600, 1800], [100.5, 302]]) {
+    const r = await rig({ props: { intervalSec } });
+    await r.run(1);
+    assert.equal(r.readings[0].staleAfterSec, expected, `${intervalSec}`);
+  }
+});
+
+test("published figures are whole percentages from 0 to 100", async () => {
+  const { toReading } = await core("readings.mjs");
+  const figures = (cpu, memPct, disk) => {
+    const sample = { os: "Linux", cpu, memPct, disks: [{ mount: "/", pct: disk }] };
+    const { cpuPct, memPct: mem, diskPct } = toReading(sample, 0);
+    return [cpuPct, mem, diskPct];
+  };
+  assert.deepEqual(figures(100 / 3, 68.75, 103), [33, 69, 100]);
+  assert.deepEqual(figures(-4, 100.6, -1), [0, 100, 0]);
+});
+
+test("a figure appearing or disappearing is written at once, however small", async () => {
+  const r = await rig();
+  r.hosts.set(null, busyHost(1));
+  await r.run(2);
+  assert.deepEqual(r.readings.map((x) => x.machines[0].cpuPct), [null, 1]);
+  r.hosts.set(null, linuxOutput({ stat: "unreadable" }));
+  await r.run(1);
+  assert.deepEqual(r.readings.map((x) => x.machines[0].cpuPct), [null, 1, null]);
+});
+
+test("readings are written on a move of 3 points or after 60 s, not on jitter", async () => {
+  const r = await rig();
+  const step = async (mem) => {
+    r.hosts.set(null, memAt(mem));
+    await r.run(1);
+    return r.readings.length;
+  };
+  assert.equal(await step(70), 1); // 0 s
+  assert.equal(await step(72), 1);
+  assert.equal(await step(68), 1);
+  assert.equal(await step(73), 2); // 45 s: 3 from the written value, 5 from the previous one
+  assert.equal(await step(71), 2);
+  assert.equal(await step(70), 3); // 75 s: 3 down
+  for (let i = 0; i < 3; i++) assert.equal(await step(71), 3);
+  assert.equal(await step(71), 4); // 135 s: 60 s newer than the written reading
+  assert.deepEqual(published(r), [{ route: null, cpuPct: null, memPct: 71, diskPct: 50, observedAt: 135 }]);
+});
+
+test("small moves add up against the written value", async () => {
+  const r = await rig();
+  for (const mem of [70, 71, 72, 73]) {
+    r.hosts.set(null, memAt(mem));
+    await r.run(1);
+  }
+  assert.deepEqual(r.readings.map((x) => x.machines[0].memPct), [70, 73]);
+});
+
+test("a clock step of 60 s either way writes unchanged figures", async () => {
+  const r = await rig();
+  const at = async (seconds) => {
+    r.clock = seconds * 1000;
+    await r.run(1);
+    return r.readings.length;
+  };
+  assert.equal(await at(600), 1);
+  assert.equal(await at(541), 1);
+  assert.equal(await at(540), 2);
+  assert.equal(await at(599), 2);
+  assert.equal(await at(600), 3);
+  assert.deepEqual(r.readings.map((x) => x.machines[0].observedAt), [600, 540, 600]);
+});
+
+test("one machine replacing another between writes is written", async () => {
+  const r = await rig({
+    machines: [remote("old")], hosts: new Map([["old", linuxOutput()], ["new", linuxOutput()]]),
+  });
+  await r.run(1);
+  r.machines = [remote("new")];
+  await r.run(1);
+  assert.deepEqual(r.readings.map((x) => x.machines.map((e) => e.route)), [[null, "old"], [null, "new"]]);
+});
+
+test("a failed or incomplete sample keeps the previous reading", async () => {
+  for (const failure of [new Error("no route"), { code: 1, stdout: "@os\nLinux\n", stderr: "" }]) {
+    const r = await rig({ machines: [remote("box")], hosts: new Map([["box", linuxOutput()]]) });
+    await r.run(1);
+    r.hosts.set("box", failure);
+    await r.run(4); // this computer's heartbeat writes every entry
+    assert.equal(r.readings.length, 2);
+    assert.deepEqual(published(r).map((e) => [e.route, e.memPct, e.observedAt]),
+      [[null, 75, 60], ["box", 75, 0]]);
+  }
+});
+
+test("removed, unavailable and unsupported machines leave the readings", async () => {
+  for (const drop of [
+    (r) => { r.machines = []; },
+    (r) => { r.machines = [remote("box", "unavailable")]; },
+    (r) => { r.hosts.set("box", { code: 4, stdout: "@os\nFreeBSD\n", stderr: "" }); },
+  ]) {
+    const r = await rig({ machines: [remote("box")], hosts: new Map([["box", linuxOutput()]]) });
+    await r.run(1);
+    assert.deepEqual(routes(r), [null, "box"]);
+    drop(r);
+    await r.run(1);
+    assert.equal(r.readings.length, 2);
+    assert.deepEqual(routes(r), [null]);
+    // Back, but not yet sampled again: the old reading does not return.
+    r.machines = [remote("box")];
+    r.hosts.set("box", new Error("not yet"));
+    await r.run(1);
+    assert.deepEqual(routes(r), [null]);
+  }
+});
+
+test("the empty list is written once published machines are all gone, never before", async () => {
+  const r = await rig({ machines: [remote("box")] });
+  r.hosts.set(null, new Error("no sh"));
+  r.hosts.set("box", new Error("no route"));
+  await r.run(6);
+  assert.deepEqual(r.readings, []);
+  r.hosts.set("box", linuxOutput());
+  await r.run(1);
+  r.machines = [];
+  await r.run(6);
+  assert.deepEqual(r.readings.map((x) => x.machines.map((e) => e.route)), [["box"], []]);
+});
+
+test("a late sample does not bring back a removed or unavailable machine", async () => {
+  for (const machines of [[], [remote("box", "unavailable")]]) {
+    const r = await rig({ machines: [remote("box")], hosts: new Map([["box", linuxOutput()]]) });
+    await r.run(1);
+    let release;
+    r.hosts.set("box", () => new Promise((resolve) => (release = resolve)));
+    const pending = r.daemon.tick();
+    await new Promise(setImmediate);
+    r.machines = machines;
+    await r.daemon.tick();
+    assert.deepEqual(routes(r), [null]);
+    release(linuxOutput());
+    await pending;
+    await r.run(1);
+    assert.ok(r.readings.slice(1).every((x) => x.machines.every((e) => e.route === null)));
+  }
+});
+
+test("a closed daemon publishes nothing", async () => {
+  let release;
+  // A machine has already answered when the daemon closes.
+  const r = await rig({ machines: [remote("box")], hosts: new Map([["box", linuxOutput()]]) });
+  r.hosts.set(null, () => new Promise((resolve) => (release = resolve)));
+  const pending = r.daemon.tick();
+  await new Promise(setImmediate);
+  r.daemon.close();
+  release(linuxOutput());
+  await pending;
+  await r.daemon.tick();
+  assert.deepEqual(r.readings, []);
 });
 
 // ---- layouts ---------------------------------------------------------------

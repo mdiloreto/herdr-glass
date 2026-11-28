@@ -1,12 +1,14 @@
-// Samples every machine, feeds the alert rules and sends what they ask for.
-// Herdr's functions are passed in. A machine name only ever travels as `exec`'s
-// `on` option, so it never reaches a shell.
+// Samples every machine, feeds the alert rules, sends what they ask for and
+// publishes the latest figures. Herdr's functions are passed in. A machine name
+// only ever travels as `exec`'s `on` option, so it never reaches a shell.
 import { createAlerts, gapMs } from "./engine.mjs";
+import { staleAfterSec, toReading, worthWriting } from "./readings.mjs";
 import {
   PROCESS_SCRIPTS, SAMPLE_SCRIPT, UNSUPPORTED_EXIT, cpuBusy, parseProcesses, parseSample,
 } from "./sample.mjs";
 
 export const STATE_KEY = "fleet-resources.state";
+export const READINGS_KEY = "fleet-resources.readings";
 export const TIMEOUT_MS = 10_000;
 
 const PRESSURE = { 1: "normal", 2: "warn", 4: "critical" };
@@ -56,6 +58,8 @@ export function createDaemon({ machines, exec, notify, shared, setShared, now, l
   const hosts = new Map(); // listed machine -> what its next sample needs; null = this computer
   const busy = new Set();
   let written = JSON.stringify(alerts.snapshot());
+  let listed = new Map(); // machine -> layout, as of the latest tick
+  let published = []; // the readings last written
   let viewerOs = PLATFORMS[platform] ?? null;
   let closed = false;
 
@@ -66,6 +70,20 @@ export function createDaemon({ machines, exec, notify, shared, setShared, now, l
     if (text === written) return;
     written = text;
     setShared(STATE_KEY, state);
+  }
+
+  // A failed sample leaves the previous reading, which ages through `observedAt`.
+  // The latest layout decides here, so a late sample cannot bring back a machine
+  // that has since become unavailable.
+  function publish() {
+    const entries = [];
+    for (const [name, host] of hosts) {
+      if (listed.get(name) === "unavailable") host.reading = null;
+      if (host.reading) entries.push({ route: name, ...host.reading });
+    }
+    if (!worthWriting(published, entries)) return;
+    published = entries;
+    setShared(READINGS_KEY, { version: 1, staleAfterSec: staleAfterSec(config), machines: entries });
   }
 
   async function desktop(title, body) {
@@ -112,6 +130,7 @@ export function createDaemon({ machines, exec, notify, shared, setShared, now, l
     host.at = at;
     if (sample?.os === "Linux") sample.cpu = cpuBusy(host.counters, sample.counters);
     host.counters = sample?.counters ?? null;
+    if (sample) host.reading = toReading(sample, at);
     if (sample && name === null) viewerOs = sample.os;
 
     const events = alerts.observe(name, sample, at);
@@ -128,7 +147,7 @@ export function createDaemon({ machines, exec, notify, shared, setShared, now, l
 
   async function check(name, layout) {
     if (layout === "loading" || busy.has(name)) return;
-    if (!hosts.has(name)) hosts.set(name, { counters: null, at: null, unsupported: false });
+    if (!hosts.has(name)) hosts.set(name, { counters: null, at: null, reading: null, unsupported: false });
     const host = hosts.get(name);
     busy.add(name);
     try {
@@ -143,6 +162,7 @@ export function createDaemon({ machines, exec, notify, shared, setShared, now, l
       }
       if (result?.code === UNSUPPORTED_EXIT) {
         host.unsupported = true;
+        host.reading = null;
         alerts.forget((machine) => machine === name);
         persist();
         return;
@@ -157,17 +177,18 @@ export function createDaemon({ machines, exec, notify, shared, setShared, now, l
   }
 
   return {
-    /** Starts one sample on every machine that has none in flight. */
+    /** Starts one sample on every machine that has none in flight, then publishes. */
     async tick() {
       if (closed) return;
       // This computer is sampled once, whether or not machines() lists it.
-      const listed = new Map([[null, "ready"]]);
+      listed = new Map([[null, "ready"]]);
       for (const { name, layout } of machines()) if (name) listed.set(name, layout);
       for (const name of hosts.keys()) if (!listed.has(name)) hosts.delete(name);
       alerts.forget((name) => !listed.has(name));
       persist();
       await Promise.all([...listed].map(([name, layout]) =>
         check(name, layout).catch((error) => log(`check failed: ${error?.message ?? error}`))));
+      if (!closed) publish();
     },
     close() {
       closed = true;

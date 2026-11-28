@@ -88,7 +88,9 @@ On macOS only critical memory pressure alerts: a busy Mac can sit at "warn" pres
 
 Disk alerts cover every writable local disk, while the Vitals panel shows only `/`. Read-only mounts, network and pseudo filesystems, `tmpfs` (except one mounted at `/tmp`) and overlays other than `/` are left out, and a Mac's APFS system volumes count once, as `/System/Volumes/Data`. For an APFS volume the percentage is its container's, which includes the other volumes in it, so it can be higher than the one `df` shows. A single mount cannot be excluded.
 
-The daemon runs read-only commands (`uname`, `/proc` reads, `getconf`, `iostat`, `sysctl`, `df`, `mount`, `top`, `ps`) on every connected machine, installs nothing on them and needs no root. Machines that report a system other than Linux or macOS are ignored; one that cannot run `sh` reads as not answering. Alerts exist only while a Herdr App window with `glass` or `glass-insights` is open.
+The daemon also publishes each machine's latest CPU, RAM and disk % in Herdr shared state, as `fleet-resources.readings`. The disk is `/`, or on a Mac `/System/Volumes/Data` where there is one; a read-only one has no figure. In `glass-insights`, once this computer has another machine added, the bottom bar shows them at its left edge, one pill for each machine on the bar, where there is room.
+
+The daemon runs read-only commands (`uname`, `/proc` reads, `getconf`, `iostat`, `sysctl`, `vm_stat`, `df`, `mount`, `top`, `ps`) on every connected machine, installs nothing on them and needs no root. Machines that report a system other than Linux or macOS are ignored; one that cannot run `sh` reads as not answering. Alerts exist only while a Herdr App window with `glass` or `glass-insights` is open.
 
 To change the defaults, add `props` to the `content` of the `fleet-resources-daemon` block in [your own copy of the layout](#customize), for example `"content": { "mod": "fleet-resources", "props": { "cpuPct": 95 } }`. An invalid value falls back to the default.
 
@@ -198,7 +200,7 @@ Herdr App 0.1.16 or later, on Linux or macOS. The installer reports most missing
 | `terminal-browser` | Web pages, on the machine that opens them. On Linux its installer may ask for extra system libraries |
 | `lsof` on this machine, `ss` on remote Linux machines | The Web panel's port list |
 | `notify-send`, `setsid` | Desktop notifications on Linux |
-| `df`, `mount`, `top`, `ps`, and on macOS `iostat` | Resource alerts and Vitals, on each machine |
+| `df`, `mount`, `top`, `ps`, and on macOS `iostat` and `vm_stat` | Resource alerts and Vitals, on each machine |
 | `curl` | Recap, and terminal-browser's installer |
 | Go | Building the pull request helper once |
 

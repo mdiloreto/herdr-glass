@@ -72,6 +72,7 @@ The base commit is the closest match found, not a recorded fork point.
 | `rail-next` | `munza/herdr-mods:better-sidebar/mods/better-sidebar` | `aa4e6115c70f08b17848d37647ccd4752abe1257` | Apache-2.0 | Same base as `better-sidebar-rail` with further agent-view and avatar changes and a `ring-gap` icon. |
 | `over9k-prompts` | `herunan/herdr-over9k:over9k-timeline/mods/over9k-prompts` | `6c595d3e16d9706026b3bc42c854f83755d8d7e2` | MIT | `mod.json` only: panel placement changed to `none`. |
 | `markdown-browser` | `ohneda/herdr-markdown-browser:mods/markdown-browser` | `bb1f3c76882266837662b2f253a241c3ee94463a` | MIT | Added terminal-mention discovery (`mentions.js`), a quick-picker overlay, opening files in `preview-plus`, and a Cmd-click link handler (`link.js`) that opens `.md` links in `preview-plus` on this computer and on remote machines. |
+| `preview-plus` | `linziyanleo/herdr-mods:preview-plus/mods/preview-plus` | `9d8e0172da18902b18650951fe3f187e19964334` | MIT; bundles Apache-2.0, EPL-2.0 and BSD-2-Clause components (see `mods/preview-plus/THIRD_PARTY.md`) | The 10 s poll of a remote file reloads it only when its content changed, its read failed or the view shows an error, so the reader keeps their place. |
 | `space-folders` | `herdrdev/herdr-app:defaults/mods/spaces` | `8672b99da5b8e33c0f69a35e7a3e500777f1b8aa` | Apache-2.0 | Added space folders with drag-and-drop, rule-based collection and per-machine storage, and new avatar tints. |
 | `space-folders-next` | `herdrdev/herdr-app:defaults/mods/spaces` | `8672b99da5b8e33c0f69a35e7a3e500777f1b8aa` | Apache-2.0 | `space-folders` plus follow-the-front-space folding, `goto` move requests and tab-drag drops. |
 
@@ -85,7 +86,6 @@ The base commit is the closest match found, not a recorded fork point.
 | `munza/herdr-mods` | Apache-2.0 | `better-alerts`*, `better-changes`*, `better-files`* |
 | `dougcunha/herdr-mods` | MIT | `ci-dash`* |
 | `quaresc/cockpit` | MIT; bundles Apache-2.0 and MIT code and ISC (Lucide) icons, see `LICENSES/quaresc-cockpit.THIRD_PARTY_NOTICES.md`. Its OFL-1.1 fonts are only in upstream `docs/` and test fixtures, not in `mods/cockpit`; the OFL text is kept in `LICENSES/` for completeness. | `cockpit` |
-| `linziyanleo/herdr-mods` | MIT; bundles Apache-2.0, EPL-2.0 and BSD-2-Clause components (see `mods/preview-plus/THIRD_PARTY.md`) | `preview-plus` |
 | `mrolafsson/herdr-recap` | MIT | `recap` |
 | `JinJieBeWater/herdr-t3` | Apache-2.0 | `t3-actions`, `t3-agents`, `t3-chrome`, `t3-home`, `t3-inbox`*, `t3-menu`, `t3-new-menu`, `t3-pane`, `t3-picker`, `t3-spaces`, `t3-tabs` |
 | `nozikov/herdr-usage-limits` | MIT; its panel icons are credited upstream to Lucide (ISC), see `LICENSES/nozikov-herdr-usage-limits.lucide.txt` | `usage-limits`* |

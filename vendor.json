@@ -52,14 +52,6 @@
     "notices": ["THIRD_PARTY_NOTICES.md", "LICENSES/Apache-2.0.txt", "LICENSES/OFL-1.1.txt"]
   },
   {
-    "repo": "linziyanleo/herdr-mods",
-    "commit": "9d8e0172da18902b18650951fe3f187e19964334",
-    "license": "MIT",
-    "paths": {
-      "mods/preview-plus": "preview-plus/mods/preview-plus"
-    }
-  },
-  {
     "repo": "mrolafsson/herdr-recap",
     "commit": "b2e25a779ad1b0260e3dcce3e39ee1974ad01382",
     "license": "MIT",

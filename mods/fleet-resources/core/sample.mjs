@@ -18,6 +18,8 @@ Darwin)
   echo @cores; sysctl -n hw.ncpu
   echo @load; sysctl -n vm.loadavg
   echo @mem; sysctl -n kern.memorystatus_vm_pressure_level; sysctl -n vm.swapusage
+  echo @vm; vm_stat
+  echo @memsize; sysctl -n hw.memsize
   ;;
 *) exit ${UNSUPPORTED_EXIT} ;;
 esac
@@ -51,7 +53,7 @@ export const PROCESS_SCRIPTS = {
   Darwin: "LC_ALL=C ps -Aceo pcpu=,comm= -r",
 };
 
-const MARKER = /^@(os|stat|cpu|cores|load|mem|df|mount|end)$/;
+const MARKER = /^@(os|stat|cpu|cores|load|mem|vm|memsize|df|mount|end)$/;
 
 function sections(stdout) {
   const out = {};
@@ -76,7 +78,7 @@ const SKIPPED_TYPES = new Set([
   "tmpfs", "devtmpfs", "efivarfs", "squashfs", "ramfs", "devfs", "autofs", "nullfs", "iso9660", "udf",
   "nfs", "nfs4", "cifs", "smb3", "smbfs", "afpfs", "webdav", "fuse.sshfs",
 ]);
-const MAC_DATA = "/System/Volumes/Data";
+export const MAC_DATA = "/System/Volumes/Data";
 
 /** The writable local disks worth watching, one per underlying filesystem. */
 export function parseDisks(dfLines, mountLines, os) {
@@ -139,8 +141,29 @@ function parseLinux(part, sample) {
     return found ? Number(found[1]) * 1024 : null;
   };
   const [total, available, swapTotal, swapFree] = ["MemTotal", "MemAvailable", "SwapTotal", "SwapFree"].map(bytes);
-  if (total > 0 && available !== null) sample.memAvailPct = (available / total) * 100;
+  if (total > 0 && available !== null) {
+    sample.memAvailPct = (available / total) * 100;
+    sample.memPct = clampPct(100 - sample.memAvailPct);
+  }
   if (swapTotal !== null && swapFree !== null) sample.swap = { used: swapTotal - swapFree, total: swapTotal };
+}
+
+// Activity Monitor's "Memory Used" (app memory, wired and compressed) as a share
+// of physical memory. Formula from mods/vitals/stats.js (Apache-2.0), adapted
+// there from ozcberkay/herdr-coban.
+function macMemPct(vmLines, memsize) {
+  const vm = vmLines.join("\n");
+  const number = (pattern) => {
+    const found = vm.match(pattern);
+    return found ? Number(found[1]) : null;
+  };
+  const pageSize = number(/page size of (\d+)/);
+  const [anonymous, purgeable, wired, compressed] = [
+    "Anonymous pages", "Pages purgeable", "Pages wired down", "Pages occupied by compressor",
+  ].map((label) => number(new RegExp(`^${label}:\\s+(\\d+)`, "m")));
+  const total = Number(memsize);
+  if ([pageSize, anonymous, purgeable, wired, compressed].includes(null) || !(total > 0)) return null;
+  return clampPct((((anonymous - purgeable + wired + compressed) * pageSize) / total) * 100);
 }
 
 const UNITS = { K: 2 ** 10, M: 2 ** 20, G: 2 ** 30 };
@@ -154,6 +177,7 @@ function parseDarwin(part, sample) {
   if (/^\d+$/.test(level ?? "")) sample.pressure = Number(level);
   const swap = (part.mem ?? []).join("\n").match(/total = ([\d.]+)([KMG])\s+used = ([\d.]+)([KMG])/);
   if (swap) sample.swap = { used: Number(swap[3]) * UNITS[swap[4]], total: Number(swap[1]) * UNITS[swap[2]] };
+  sample.memPct = macMemPct(part.vm ?? [], part.memsize?.[0]);
 }
 
 /**
@@ -172,6 +196,7 @@ export function parseSample(stdout) {
     cores: Number(part.cores?.[0]) || null,
     load: load ? Number(load[0]) : null,
     memAvailPct: null,
+    memPct: null,
     pressure: null,
     swap: null,
     disks: parseDisks(part.df ?? [], part.mount ?? [], os),

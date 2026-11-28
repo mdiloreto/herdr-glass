@@ -1,5 +1,6 @@
 // Zero-size daemon mod that watches CPU, memory and disk on every connected
-// machine and notifies about spikes, whether or not any panel is open.
+// machine, notifies about spikes and publishes the latest figures, whether or
+// not any panel is open.
 import { View, div } from "gpui-kit";
 import { machines, exec, notify, shared, setShared, props, checking, window } from "herdr";
 import { readConfig } from "./core/engine.mjs";

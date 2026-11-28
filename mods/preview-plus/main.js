@@ -365,7 +365,7 @@ export default class PreviewPlus extends View {
       try {
         const value = await readTextFile(selected.file, { on: selected.on });
         if (!this.current(request) || this.loading) return;
-        if (value !== request.value) this.load(cx);
+        if (value !== request.value || this.error) this.load(cx);
       } catch {
         if (this.current(request)) this.load(cx);
       } finally { if (this.textPoll === request) this.textPoll = null; }

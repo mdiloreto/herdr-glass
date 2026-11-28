@@ -71,7 +71,7 @@ function remotePreview(state) {
     props: () => ({ file: "/srv/docs/guide.md", root: "/srv/docs", on: "linux", space: "linux/sp1" }),
     shared: () => undefined, setShared() {}, spaces: () => [{ id: "linux/sp1", active: true, machine: "linux" }],
     panes: () => [], terminals: () => [], focused: () => ({ space: "linux/sp1", pane: "p1" }), run() {},
-    readTextFile: async (file, opts) => { state.reads.push({ file, on: opts?.on }); return state.content; },
+    readTextFile: async (file, opts) => { state.reads.push({ file, on: opts?.on }); if (state.failNext-- > 0) throw new Error("gone"); return state.content; },
     writeTextFile: async () => {}, watchFolder: () => new Promise(() => {}), checking: () => false,
     settings: () => ({}), nextCommand: () => new Promise(() => {}), exec: async () => ({ code: 1, stdout: "", stderr: "" }),
     window: () => ({ platform: "macos" }), appHome: () => root, theme: () => ({}),
@@ -82,7 +82,7 @@ function remotePreview(state) {
 }
 
 test("the 10 s poll keeps an unchanged remote file rendered instead of reloading it", async () => {
-  const state = { reads: [], content: "# Guide\n\nBody text.\n" };
+  const state = { reads: [], failNext: 0, content: "# Guide\n\nBody text.\n" };
   const { mod, cx } = remotePreview(state);
   await settle();
   const blocks = mod.markdownBlocks;
@@ -96,7 +96,7 @@ test("the 10 s poll keeps an unchanged remote file rendered instead of reloading
 });
 
 test("the 10 s poll reloads a remote file whose content changed", async () => {
-  const state = { reads: [], content: "# Guide\n\nBody text.\n" };
+  const state = { reads: [], failNext: 0, content: "# Guide\n\nBody text.\n" };
   const { mod, cx } = remotePreview(state);
   await settle();
   const blocks = mod.markdownBlocks;
@@ -106,4 +106,30 @@ test("the 10 s poll reloads a remote file whose content changed", async () => {
 
   assert.notEqual(mod.markdownBlocks, blocks);
   assert.equal(mod.text, state.content);
+});
+
+test("the 10 s poll reloads when the read fails", async () => {
+  const state = { reads: [], failNext: 0, content: "# Guide\n\nBody text.\n" };
+  const { mod, cx } = remotePreview(state);
+  await settle();
+  const blocks = mod.markdownBlocks;
+
+  state.failNext = 1;
+  await tick(cx, 10000);
+
+  assert.equal(state.reads.length, 3);
+  assert.notEqual(mod.markdownBlocks, blocks);
+  assert.equal(mod.error, null);
+});
+
+test("the 10 s poll retries a view that failed to render", async () => {
+  const state = { reads: [], failNext: 0, content: "binary\0data" };
+  const { mod, cx } = remotePreview(state);
+  await settle();
+  assert.match(mod.error, /binary/);
+
+  await tick(cx, 10000);
+
+  assert.equal(state.reads.length, 3);
+  assert.match(mod.error, /binary/);
 });
